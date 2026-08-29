@@ -8,7 +8,10 @@ import {
   chooseSshKey,
   connectGithubProfile,
   inspectGithubProfile,
+  listenForGithubAuthPrompt,
+  openGithubAuthPage,
   previewAssignment,
+  publishRepository,
   removeRepository,
   saveProfile,
 } from "./backend";
@@ -28,7 +31,7 @@ import {
   TerminalIcon,
   TrashIcon,
 } from "./Icons";
-import type { AppData, ApplyPreview, BootstrapResult, GhProfileStatus, Profile } from "./types";
+import type { AppData, ApplyPreview, BootstrapResult, GhProfileStatus, GithubAuthPrompt, Profile, PublishOptions, RepositoryRecord, RepositoryVisibility } from "./types";
 import { compactPath, initials, profileIsComplete } from "./types";
 import { localizeRuntimeMessage, uiCopy, type Locale } from "./i18n";
 import "./App.css";
@@ -115,7 +118,30 @@ function ProfileEditor({
   const [linking, setLinking] = useState(false);
   const [checking, setChecking] = useState(false);
   const [ghStatus, setGhStatus] = useState<GhProfileStatus | null>(null);
+  const [authPrompt, setAuthPrompt] = useState<GithubAuthPrompt | null>(null);
+  const [codeCopied, setCodeCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    let unlisten: (() => void) | undefined;
+    listenForGithubAuthPrompt((prompt) => {
+      if (!active || prompt.profileId !== initial.id) return;
+      setAuthPrompt(prompt);
+      setCodeCopied(true);
+    })
+      .then((cleanup) => {
+        if (active) unlisten = cleanup;
+        else cleanup();
+      })
+      .catch((cause) => {
+        if (active) setError(messageFrom(cause, locale));
+      });
+    return () => {
+      active = false;
+      unlisten?.();
+    };
+  }, [initial.id, locale]);
 
   useEffect(() => {
     if (!initial.ghConfigDir) return;
@@ -150,13 +176,35 @@ function ProfileEditor({
 
   const connectGithub = async () => {
     setError(null);
+    setAuthPrompt(null);
+    setCodeCopied(false);
     setLinking(true);
     try {
       applyGhStatus(await connectGithubProfile(draft.id, draft.ghConfigDir));
+      setAuthPrompt(null);
     } catch (cause) {
+      setAuthPrompt(null);
       setError(messageFrom(cause, locale));
     } finally {
       setLinking(false);
+    }
+  };
+
+  const copyAuthCode = async () => {
+    if (!authPrompt) return;
+    try {
+      await navigator.clipboard.writeText(authPrompt.code);
+      setCodeCopied(true);
+    } catch {
+      setError(copy.couldNotCopyCode);
+    }
+  };
+
+  const reopenGithubAuth = async () => {
+    try {
+      await openGithubAuthPage();
+    } catch (cause) {
+      setError(messageFrom(cause, locale));
     }
   };
 
@@ -243,6 +291,19 @@ function ProfileEditor({
               </div>
             )}
           </div>
+          {authPrompt && (
+            <div className="github-device-card" role="status" aria-live="polite">
+              <div className="github-device-copy">
+                <span>{copy.githubOneTimeCode}</span>
+                <code>{authPrompt.code}</code>
+              </div>
+              <p>{copy.githubDeviceInstructions}</p>
+              <div className="github-device-actions">
+                <button className="button button--ghost" type="button" onClick={copyAuthCode}>{codeCopied ? copy.codeCopied : copy.copyCode}</button>
+                <button className="button button--primary" type="button" onClick={reopenGithubAuth}>{copy.openGithubAuthPage}</button>
+              </div>
+            </div>
+          )}
           {!ghAvailable && <code className="install-command">{copy.ghInstallCommand}</code>}
           <div className="profile-form-grid compact-grid">
             <label className="field">
@@ -345,6 +406,95 @@ function ApplyDialog({
   );
 }
 
+function PublishDialog({
+  repository,
+  profile,
+  locale,
+  onClose,
+  onPublish,
+}: {
+  repository: RepositoryRecord;
+  profile: Profile;
+  locale: Locale;
+  onClose: () => void;
+  onPublish: (options: PublishOptions) => Promise<void>;
+}) {
+  const copy = uiCopy[locale];
+  const [name, setName] = useState(repository.name);
+  const [description, setDescription] = useState("");
+  const [visibility, setVisibility] = useState<RepositoryVisibility>("private");
+  const [publishing, setPublishing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const owner = profile.githubUsername ?? "";
+
+  const publish = async (event: FormEvent) => {
+    event.preventDefault();
+    setPublishing(true);
+    setError(null);
+    try {
+      await onPublish({ repositoryId: repository.id, profileId: profile.id, name, visibility, description });
+    } catch (cause) {
+      setError(messageFrom(cause, locale));
+      setPublishing(false);
+    }
+  };
+
+  return (
+    <div className="modal-layer" role="presentation" onMouseDown={onClose}>
+      <form className="modal publish-modal" onSubmit={publish} onMouseDown={(event) => event.stopPropagation()}>
+        <div className="modal-header">
+          <div>
+            <p className="eyebrow">GitHub</p>
+            <h2>{copy.publishRepository}</h2>
+          </div>
+          <button className="icon-button" type="button" onClick={onClose} aria-label={copy.close}><CloseIcon /></button>
+        </div>
+        <p className="modal-lead">{copy.publishLead}</p>
+
+        <div className="publish-destination">
+          <ProfileAvatar profile={profile} />
+          <div><span>{copy.publishDestination}</span><strong>@{owner} / {name || "…"}</strong></div>
+        </div>
+
+        <div className="profile-form-grid publish-form-grid">
+          <label className="field">
+            <span>{copy.githubRepositoryName}</span>
+            <input required maxLength={100} pattern="[A-Za-z0-9._-]+" value={name} onChange={(event) => setName(event.currentTarget.value)} />
+          </label>
+          <label className="field">
+            <span>{copy.visibility}</span>
+            <select value={visibility} onChange={(event) => setVisibility(event.currentTarget.value as RepositoryVisibility)}>
+              <option value="private">{copy.privateRepository}</option>
+              <option value="public">{copy.publicRepository}</option>
+            </select>
+          </label>
+          <label className="field field--wide">
+            <span>{copy.description} <small>{copy.optional}</small></span>
+            <input maxLength={350} value={description} onChange={(event) => setDescription(event.currentTarget.value)} placeholder={copy.descriptionPlaceholder} />
+          </label>
+        </div>
+
+        <div className={`publish-scope ${visibility === "public" ? "is-public" : ""}`}>
+          <ShieldIcon />
+          <div><strong>{visibility === "private" ? copy.privatePublishTitle : copy.publicPublishTitle}</strong><span>{visibility === "private" ? copy.privatePublishLead : copy.publicPublishLead}</span></div>
+        </div>
+
+        <ol className="publish-steps">
+          <li>{copy.createGithubRepository}</li>
+          <li>{copy.addOriginRemote}</li>
+          <li>{copy.pushCurrentBranch(repository.branch || copy.noBranch)}</li>
+        </ol>
+
+        {error && <div className="inline-error"><AlertIcon />{error}</div>}
+        <div className="modal-actions">
+          <button className="button button--ghost" type="button" onClick={onClose} disabled={publishing}>{copy.cancel}</button>
+          <button className="button button--primary" type="submit" disabled={publishing || !owner}>{publishing ? copy.publishing : copy.createAndPush}</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function App({ locale = "en" }: { locale?: Locale }) {
   const copy = uiCopy[locale];
   const [result, setResult] = useState<BootstrapResult | null>(null);
@@ -356,6 +506,7 @@ function App({ locale = "en" }: { locale?: Locale }) {
   const [pendingProfileId, setPendingProfileId] = useState("");
   const [editingProfile, setEditingProfile] = useState<EditingProfile | null>(null);
   const [preview, setPreview] = useState<ApplyPreview | null>(null);
+  const [publishTarget, setPublishTarget] = useState<{ repository: RepositoryRecord; profile: Profile } | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -442,6 +593,13 @@ function App({ locale = "en" }: { locale?: Locale }) {
     setPendingProfileId(preview.profile.id);
     setPreview(null);
     setNotice(copy.profileApplied(preview.profile.label, preview.repository.name));
+  };
+
+  const publishRepositoryAction = async (options: PublishOptions) => {
+    const published = await publishRepository(options);
+    updateData(published.data);
+    setPublishTarget(null);
+    setNotice(copy.repositoryPublished(published.repositoryUrl));
   };
 
   const removeSelected = async () => {
@@ -618,6 +776,11 @@ function App({ locale = "en" }: { locale?: Locale }) {
                 <div className="scope-note"><ShieldIcon /><div><strong>{copy.repositoryLocalChange}</strong><span>{copy.globalSettingsUntouched}</span></div></div>
 
                 <button className="button button--primary button--wide" disabled={!pendingProfile || !profileIsComplete(pendingProfile) || busy} onClick={reviewAssignment}>{copy.reviewAndApply}</button>
+                {selectedRepository.remoteUrl ? (
+                  <div className="remote-ready"><CheckIcon /><div><strong>{copy.githubRemoteReady}</strong><span title={selectedRepository.remoteUrl}>{compactPath(selectedRepository.remoteUrl, 38)}</span></div></div>
+                ) : (
+                  <button className="button button--publish button--wide" disabled={!assignedProfile?.githubUsername || !assignedProfile.ghConfigDir || !selectedRepository.lastAppliedAt || busy} onClick={() => assignedProfile && setPublishTarget({ repository: selectedRepository, profile: assignedProfile })}><TerminalIcon />{copy.publishToGithub}</button>
+                )}
                 <button className="danger-link" onClick={removeSelected}><TrashIcon />{copy.removeFromGitContext}</button>
               </aside>
             )}
@@ -627,6 +790,7 @@ function App({ locale = "en" }: { locale?: Locale }) {
 
       {editingProfile && <ProfileEditor initial={editingProfile.profile} creating={editingProfile.creating} ghAvailable={environment.gh.available} locale={locale} onClose={() => setEditingProfile(null)} onSave={saveProfileAction} />}
       {preview && <ApplyDialog preview={preview} locale={locale} onClose={() => setPreview(null)} onApply={applyProfileAction} />}
+      {publishTarget && <PublishDialog repository={publishTarget.repository} profile={publishTarget.profile} locale={locale} onClose={() => setPublishTarget(null)} onPublish={publishRepositoryAction} />}
     </div>
   );
 }

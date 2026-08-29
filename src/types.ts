@@ -53,6 +53,27 @@ export interface GhProfileStatus {
   configDir?: string | null;
 }
 
+export interface GithubAuthPrompt {
+  profileId: string;
+  code: string;
+  verificationUrl: string;
+}
+
+export type RepositoryVisibility = "private" | "public";
+
+export interface PublishOptions {
+  repositoryId: string;
+  profileId: string;
+  name: string;
+  visibility: RepositoryVisibility;
+  description?: string | null;
+}
+
+export interface PublishResult {
+  data: AppData;
+  repositoryUrl: string;
+}
+
 export interface ConfigChange {
   key: string;
   currentValue?: string | null;

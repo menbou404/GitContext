@@ -41,6 +41,15 @@ Profileは次の参照と公開設定をまとめる。
 
 書き込みの前にキー単位で現在値と予定値を表示する。ユーザーが明示的に確認した場合だけ適用する。
 
+### GitHub publish
+
+- 接続済みかつ適用済みのProfileだけを使用する
+- 作成先はProfileで認証したGitHubユーザーから取得し、任意owner文字列を受け付けない
+- リポジトリ名、説明、公開／非公開を実行前に表示する（初期値は非公開）
+- GitHubリポジトリ作成、`origin`設定、現在ブランチのpushをまとめて実行する
+- 既存の`origin`、未コミット変更、コミットのないリポジトリ、detached HEADは拒否する
+- フロントエンドから任意のshell文字列を受け取らず、Rust側で検証した固定引数だけを`gh repo create`へ渡す
+
 ## データモデル
 
 ```text
@@ -80,7 +89,7 @@ AppData
 GH_CONFIG_DIR=<profile directory> gh auth login --hostname github.com --git-protocol ssh --web --clipboard --skip-ssh-key
 ```
 
-認証後は `gh api user --hostname github.com --jq .login` でユーザー名と接続状態を確認する。Profile用ディレクトリはユーザーのhome配下だけを許可し、token環境変数は子プロセスから除外する。tokenを表示する `--show-token` は使わない。今後GitContext内から `gh` 操作を追加するときも、リポジトリのworking directoryとProfileの `GH_CONFIG_DIR` をプロセス環境へ渡す方式に統一する。一般の外部terminal全体を暗黙に書き換えることはしない。
+GitHub CLIが発行したワンタイムコードはTauri eventで認証中の画面へだけ渡し、状態ファイルやログには保存しない。同時に固定URL `https://github.com/login/device` をOSの既定ブラウザで開く。認証後は `gh api user --hostname github.com --jq .login` でユーザー名と接続状態を確認する。Profile用ディレクトリはユーザーのhome配下だけを許可し、token環境変数は子プロセスから除外する。tokenを表示する `--show-token` は使わない。今後GitContext内から `gh` 操作を追加するときも、リポジトリのworking directoryとProfileの `GH_CONFIG_DIR` をプロセス環境へ渡す方式に統一する。一般の外部terminal全体を暗黙に書き換えることはしない。
 
 ## MVPの範囲
 
@@ -93,6 +102,7 @@ GH_CONFIG_DIR=<profile directory> gh auth login --hostname github.com --git-prot
 - repository-local Git identity / SSH commandのtransactionalな適用
 - Git / gh / SSHの環境検出
 - Profile別gh設定の非秘密な認証状態確認
+- GitHub公開前レビュー、リポジトリ作成、origin設定、初回push
 - ブラウザ用interactive previewとフロントエンドテスト
 
 次の候補:

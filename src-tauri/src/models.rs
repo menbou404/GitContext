@@ -103,6 +103,13 @@ pub struct ApplyPreview {
     pub warnings: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublishResult {
+    pub data: AppData,
+    pub repository_url: String,
+}
+
 pub fn clean_optional(value: Option<String>) -> Option<String> {
     value.and_then(|item| {
         let trimmed = item.trim().to_string();

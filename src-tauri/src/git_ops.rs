@@ -83,6 +83,29 @@ pub fn apply_profile(repository: &RepositoryRecord, profile: &Profile) -> Result
     Ok(())
 }
 
+pub fn validate_publish_source(repository: &RepositoryRecord) -> Result<(), String> {
+    let root = repository_root(&repository.path)?;
+    if git_optional(&root, &["config", "--get", "remote.origin.url"]).is_some() {
+        return Err("This repository already has an origin remote.".into());
+    }
+    output_text(&run_git(&root, &["rev-parse", "--verify", "HEAD"])?)?;
+    let status = output_text(&run_git(&root, &["status", "--porcelain"])?)?;
+    if !status.is_empty() {
+        return Err("Commit or discard all local changes before publishing to GitHub.".into());
+    }
+    let branch = output_text(&run_git(&root, &["branch", "--show-current"])?)?;
+    if branch.is_empty() {
+        return Err("Check out a branch before publishing to GitHub.".into());
+    }
+    Ok(())
+}
+
+pub fn origin_url(repository_path: &str) -> Result<String, String> {
+    let root = repository_root(repository_path)?;
+    git_optional(&root, &["config", "--get", "remote.origin.url"])
+        .ok_or_else(|| "GitHub CLI did not configure the origin remote.".into())
+}
+
 fn repository_root(input: &str) -> Result<PathBuf, String> {
     let requested = fs::canonicalize(input)
         .map_err(|error| format!("Repository path is not accessible: {error}"))?;

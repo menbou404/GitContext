@@ -111,6 +111,8 @@ svg { width: 20px; height: 20px; }
 .button--primary:hover { background: var(--green-800); transform: translateY(-1px); }
 .button--ghost { color: #53635e; border-color: var(--line); background: #fff; }
 .button--ghost:hover { border-color: #b6c7c0; }
+.button--publish { margin-top: 8px; color: #254f68; border-color: #bfd4df; background: #eef6fa; }
+.button--publish:hover { border-color: #94bacd; background: #e4f1f7; }
 .button--add { min-width: 132px; }
 .button--wide { width: 100%; }
 
@@ -201,6 +203,7 @@ svg { width: 20px; height: 20px; }
 .profile-modal { width: min(780px, calc(100vw - 60px)); }
 .profile-modal-lead { max-width: 580px; margin-bottom: 0; }
 .apply-modal { width: min(620px, calc(100vw - 60px)); }
+.publish-modal { width: min(620px, calc(100vw - 60px)); }
 .modal-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
 .modal-header h2 { margin: 0; color: #23362f; font-family: Georgia, "Times New Roman", serif; font-size: 23px; font-weight: 500; letter-spacing: -.25px; }
 .modal-lead { margin: 10px 0 18px; color: #75837e; font-size: 10px; line-height: 1.55; }
@@ -220,14 +223,22 @@ svg { width: 20px; height: 20px; }
 .connection-card small { max-width: 350px; margin-top: 3px; color: #7c8985; font-size: 8px; line-height: 1.45; }
 .connection-actions { display: flex; gap: 6px; align-items: center; }
 .connection-actions .button { min-height: 31px; padding: 7px 10px; font-size: 8px; }
+.github-device-card { display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 13px; margin-top: 10px; padding: 12px; color: #345349; border: 1px solid #bad7cb; border-radius: 9px; background: #eef7f3; }
+.github-device-copy { display: grid; gap: 4px; }
+.github-device-copy span { color: #668078; font-size: 8px; font-weight: 700; }
+.github-device-copy code { color: #183e34; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 17px; font-weight: 800; letter-spacing: 1.4px; user-select: all; }
+.github-device-card p { max-width: 300px; margin: 0; color: #617970; font-size: 8px; line-height: 1.5; }
+.github-device-actions { display: flex; gap: 6px; }
+.github-device-actions .button { min-height: 31px; padding: 7px 10px; font-size: 8px; white-space: nowrap; }
 .install-command { display: block; margin-top: 9px; padding: 8px 10px; color: #635b4b; border: 1px solid #eadbbd; border-radius: 7px; background: #fff9ed; font-size: 9px; user-select: all; }
 .field { display: grid; gap: 6px; }
 .field--wide { grid-column: 1 / -1; }
 .field > span, .accent-field legend { color: #596a64; font-size: 9px; font-weight: 700; }
 .field small { margin-left: 3px; color: #95a09c; font-size: 8px; font-weight: 500; }
-.field input, .path-input, .input-prefix { width: 100%; min-width: 0; border: 1px solid #dce4e0; border-radius: 8px; color: #2f423b; background: #fff; font-size: 10px; outline: 0; }
+.field input, .field select, .path-input, .input-prefix { width: 100%; min-width: 0; border: 1px solid #dce4e0; border-radius: 8px; color: #2f423b; background: #fff; font-size: 10px; outline: 0; }
 .field > input { padding: 10px 11px; }
-.field input:focus, .path-input:focus-within, .input-prefix:focus-within { border-color: #91b5a8; box-shadow: 0 0 0 3px rgba(49,109,95,.08); }
+.field > select { padding: 9px 11px; }
+.field input:focus, .field select:focus, .path-input:focus-within, .input-prefix:focus-within { border-color: #91b5a8; box-shadow: 0 0 0 3px rgba(49,109,95,.08); }
 .path-input, .input-prefix { display: flex; align-items: center; overflow: hidden; }
 .path-input input, .input-prefix input { min-width: 0; flex: 1; padding: 10px 11px; border: 0; box-shadow: none; }
 .path-input button { align-self: stretch; padding: 0 12px; color: #4b695f; border: 0; border-left: 1px solid #e0e6e3; background: #f4f7f5; font-size: 9px; font-weight: 700; }
@@ -253,6 +264,25 @@ svg { width: 20px; height: 20px; }
 .change-values span { color: #8a9691; text-decoration: line-through; }
 .change-values strong { color: #30453d; }
 .change-values svg { width: 12px; color: #8f9b97; }
+.publish-destination { display: flex; align-items: center; gap: 10px; padding: 11px; border: 1px solid #dfe7e3; border-radius: 9px; background: #f8faf9; }
+.publish-destination span, .publish-destination strong { display: block; }
+.publish-destination span { margin-bottom: 3px; color: #82908b; font-size: 8px; }
+.publish-destination strong { color: #30453d; font-size: 11px; }
+.publish-form-grid { margin-top: 15px; }
+.publish-scope { display: flex; align-items: flex-start; gap: 9px; margin-top: 14px; padding: 11px; color: #526f65; border-radius: 9px; background: #edf5f1; }
+.publish-scope.is-public { color: #865f32; background: #fcf4e8; }
+.publish-scope > svg { width: 16px; flex: 0 0 auto; }
+.publish-scope strong, .publish-scope span { display: block; }
+.publish-scope strong { font-size: 9px; }
+.publish-scope span { margin-top: 3px; font-size: 8px; line-height: 1.45; }
+.publish-steps { display: grid; gap: 7px; margin: 14px 0 0; padding: 0; counter-reset: publish-step; list-style: none; }
+.publish-steps li { display: flex; align-items: center; gap: 8px; color: #60726c; font-size: 9px; }
+.publish-steps li::before { width: 19px; height: 19px; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; color: #fff; border-radius: 50%; background: #66887c; counter-increment: publish-step; content: counter(publish-step); font-size: 8px; font-weight: 800; }
+.remote-ready { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding: 10px; color: #4c6d61; border: 1px solid #cce0d8; border-radius: 8px; background: #f1f8f5; }
+.remote-ready > svg { width: 15px; }
+.remote-ready strong, .remote-ready span { display: block; }
+.remote-ready strong { font-size: 8px; }
+.remote-ready span { max-width: 220px; margin-top: 2px; overflow: hidden; color: #72867f; font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
 
 .loading-state, .fatal-state { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #667770; background: #f2f5f2; }
 .loading-state .brand-mark { animation: pulse 1.6s ease-in-out infinite; }
@@ -270,6 +300,11 @@ svg { width: 20px; height: 20px; }
   .summary-grid article { grid-template-columns: auto 1fr; }
   .summary-grid em { display: none; }
   .content { padding-inline: 24px; }
+}
+
+@media (max-width: 720px) {
+  .github-device-card { grid-template-columns: 1fr; }
+  .github-device-actions { flex-wrap: wrap; }
 }
 
 @media (prefers-reduced-motion: reduce) {

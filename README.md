@@ -12,6 +12,7 @@ GitContextは、学校用・趣味用など複数のGitHub作業identityを、�
 - repositoryごとのProfile割当
 - 適用前の差分レビュー
 - `.git/config` へのrepository-local設定反映
+- 接続済みProfileを使ったGitHubリポジトリ作成、`origin`設定、初回push
 - 既存の `~/.ssh` と `gh` 設定を参照（秘密情報は保存しない）
 
 設計と安全境界は [docs/MVP_DESIGN.md](docs/MVP_DESIGN.md) を参照してください。
@@ -31,7 +32,7 @@ GitHub CLIがない場合、Profile作成画面に次の導入コマンドを表
 winget install --id GitHub.cli
 ```
 
-Profile画面の「GitHubに接続」を押すとGitHub公式のブラウザ認証が始まります。認証情報はProfile専用の `GH_CONFIG_DIR` にGitHub CLI自身が保存し、GitContextはtokenを読み取り・保存しません。
+Profile画面の「GitHubに接続」を押すとGitHub公式のブラウザ認証が始まります。ワンタイムコードは認証中だけ画面に表示され、認証ページも自動で開きます。認証情報はProfile専用の `GH_CONFIG_DIR` にGitHub CLI自身が保存し、GitContextはコードやtokenを状態ファイルへ保存しません。
 
 ## 開発
 
@@ -59,3 +60,4 @@ npm run dev
 - SSH秘密鍵やGitHub tokenをアプリに保存しない
 - 適用前に変更予定を表示する
 - 複数設定の途中失敗時は元のローカル値へ戻す
+- GitHub公開はコミット済みで変更のないリポジトリだけを対象にし、公開範囲と実行内容を直前に確認する

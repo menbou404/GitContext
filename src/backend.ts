@@ -1,4 +1,5 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { demoBootstrap } from "./demoData";
 import type {
@@ -6,7 +7,10 @@ import type {
   ApplyPreview,
   BootstrapResult,
   GhProfileStatus,
+  GithubAuthPrompt,
   Profile,
+  PublishOptions,
+  PublishResult,
   RepositoryRecord,
 } from "./types";
 
@@ -68,7 +72,7 @@ export async function addRepository(path: string): Promise<RepositoryRecord> {
       id: nextDemoId("repo"),
       name,
       path,
-      remoteUrl: "git@github.com:example/new-project.git",
+      remoteUrl: null,
       branch: "main",
       profileId: null,
       lastAppliedAt: null,
@@ -131,6 +135,21 @@ export async function connectGithubProfile(
   return invoke<GhProfileStatus>("connect_github_profile", { profileId, ghConfigDir });
 }
 
+export async function listenForGithubAuthPrompt(
+  handler: (prompt: GithubAuthPrompt) => void,
+): Promise<UnlistenFn> {
+  if (!inDesktopApp()) return () => undefined;
+  return listen<GithubAuthPrompt>("github-auth-prompt", (event) => handler(event.payload));
+}
+
+export async function openGithubAuthPage(): Promise<void> {
+  if (!inDesktopApp()) {
+    window.open("https://github.com/login/device", "_blank", "noopener,noreferrer");
+    return;
+  }
+  return invoke<void>("open_github_auth_page");
+}
+
 export async function previewAssignment(
   repositoryId: string,
   profileId: string,
@@ -174,4 +193,26 @@ export async function applyAssignment(
     return structuredClone(demoState);
   }
   return invoke<AppData>("apply_profile", { repositoryId, profileId });
+}
+
+export async function publishRepository(options: PublishOptions): Promise<PublishResult> {
+  if (!inDesktopApp()) {
+    const repository = demoState.repositories.find((item) => item.id === options.repositoryId);
+    const profile = demoState.profiles.find((item) => item.id === options.profileId);
+    if (!repository || !profile?.githubUsername) throw new Error("Repository or profile was not found.");
+    const repositoryUrl = `https://github.com/${profile.githubUsername}/${options.name}`;
+    demoState.repositories = demoState.repositories.map((item) =>
+      item.id === options.repositoryId
+        ? { ...item, remoteUrl: `git@github.com:${profile.githubUsername}/${options.name}.git` }
+        : item,
+    );
+    return { data: structuredClone(demoState), repositoryUrl };
+  }
+  return invoke<PublishResult>("publish_repository", {
+    repositoryId: options.repositoryId,
+    profileId: options.profileId,
+    name: options.name,
+    visibility: options.visibility,
+    description: options.description,
+  });
 }

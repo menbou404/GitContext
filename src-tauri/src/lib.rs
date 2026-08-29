@@ -15,10 +15,12 @@ pub fn run() {
             commands::save_profile,
             commands::inspect_github_profile,
             commands::connect_github_profile,
+            commands::open_github_auth_page,
             commands::add_repository,
             commands::remove_repository,
             commands::preview_assignment,
             commands::apply_profile,
+            commands::publish_repository,
         ])
         .run(tauri::generate_context!())
         .expect("error while running GitContext");
