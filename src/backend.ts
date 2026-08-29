@@ -5,6 +5,7 @@ import type {
   AppData,
   ApplyPreview,
   BootstrapResult,
+  GhProfileStatus,
   Profile,
   RepositoryRecord,
 } from "./types";
@@ -23,38 +24,38 @@ export async function bootstrap(): Promise<BootstrapResult> {
   return invoke<BootstrapResult>("bootstrap");
 }
 
-export async function chooseRepositoryDirectory(): Promise<string | null> {
+export async function chooseRepositoryDirectory(title = "Select a Git repository"): Promise<string | null> {
   if (!inDesktopApp()) {
     return "C:\\Users\\you\\Projects\\new-project";
   }
   const selected = await open({
     directory: true,
     multiple: false,
-    title: "Select a Git repository",
+    title,
   });
   return typeof selected === "string" ? selected : null;
 }
 
-export async function chooseSshKey(): Promise<string | null> {
+export async function chooseSshKey(title = "Select an existing SSH private key"): Promise<string | null> {
   if (!inDesktopApp()) {
     return "C:\\Users\\you\\.ssh\\id_ed25519_personal";
   }
   const selected = await open({
     directory: false,
     multiple: false,
-    title: "Select an existing SSH private key",
+    title,
   });
   return typeof selected === "string" ? selected : null;
 }
 
-export async function chooseGhConfigDirectory(): Promise<string | null> {
+export async function chooseGhConfigDirectory(title = "Select an existing GitHub CLI config directory"): Promise<string | null> {
   if (!inDesktopApp()) {
     return "C:\\Users\\you\\.config\\gh-personal";
   }
   const selected = await open({
     directory: true,
     multiple: false,
-    title: "Select an existing GitHub CLI config directory",
+    title,
   });
   return typeof selected === "string" ? selected : null;
 }
@@ -96,6 +97,38 @@ export async function saveProfile(profile: Profile): Promise<AppData> {
     return structuredClone(demoState);
   }
   return invoke<AppData>("save_profile", { profile });
+}
+
+export async function inspectGithubProfile(
+  profileId: string,
+  ghConfigDir?: string | null,
+): Promise<GhProfileStatus> {
+  if (!inDesktopApp()) {
+    return {
+      available: true,
+      authenticated: Boolean(ghConfigDir),
+      username: ghConfigDir ? "connected-account" : null,
+      detail: ghConfigDir ? null : "This Profile has not been connected to GitHub yet.",
+      configDir: ghConfigDir || `C:\\Users\\you\\AppData\\Roaming\\app.gitcontext.desktop\\gh\\${profileId}`,
+    };
+  }
+  return invoke<GhProfileStatus>("inspect_github_profile", { profileId, ghConfigDir });
+}
+
+export async function connectGithubProfile(
+  profileId: string,
+  ghConfigDir?: string | null,
+): Promise<GhProfileStatus> {
+  if (!inDesktopApp()) {
+    return {
+      available: true,
+      authenticated: true,
+      username: "connected-account",
+      detail: null,
+      configDir: ghConfigDir || `C:\\Users\\you\\AppData\\Roaming\\app.gitcontext.desktop\\gh\\${profileId}`,
+    };
+  }
+  return invoke<GhProfileStatus>("connect_github_profile", { profileId, ghConfigDir });
 }
 
 export async function previewAssignment(

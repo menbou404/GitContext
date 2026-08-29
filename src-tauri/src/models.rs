@@ -43,29 +43,8 @@ pub struct AppData {
 impl Default for AppData {
     fn default() -> Self {
         Self {
-            version: 1,
-            profiles: vec![
-                Profile {
-                    id: "personal".into(),
-                    label: "Personal".into(),
-                    accent: "#d8a33f".into(),
-                    git_name: String::new(),
-                    git_email: String::new(),
-                    github_username: None,
-                    ssh_key_path: None,
-                    gh_config_dir: None,
-                },
-                Profile {
-                    id: "school".into(),
-                    label: "School".into(),
-                    accent: "#56a7d9".into(),
-                    git_name: String::new(),
-                    git_email: String::new(),
-                    github_username: None,
-                    ssh_key_path: None,
-                    gh_config_dir: None,
-                },
-            ],
+            version: 2,
+            profiles: Vec::new(),
             repositories: Vec::new(),
         }
     }
@@ -95,6 +74,16 @@ pub struct BootstrapResult {
     pub environment: EnvironmentStatus,
     pub storage_path: Option<String>,
     pub demo_mode: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GhProfileStatus {
+    pub available: bool,
+    pub authenticated: bool,
+    pub username: Option<String>,
+    pub detail: Option<String>,
+    pub config_dir: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -132,14 +121,7 @@ pub fn normalize_profile(mut profile: Profile) -> Profile {
 }
 
 pub fn validate_profile(profile: &Profile) -> Result<(), String> {
-    validate_text("Profile ID", &profile.id, true, 128)?;
-    if !profile
-        .id
-        .chars()
-        .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
-    {
-        return Err("Profile ID contains unsupported characters.".into());
-    }
+    validate_profile_id(&profile.id)?;
     validate_text("Profile name", &profile.label, true, 80)?;
     validate_text("Git author name", &profile.git_name, true, 160)?;
     validate_text("Git author email", &profile.git_email, true, 254)?;
@@ -161,6 +143,57 @@ pub fn validate_profile(profile: &Profile) -> Result<(), String> {
     Ok(())
 }
 
+pub fn validate_profile_id(id: &str) -> Result<(), String> {
+    validate_text("Profile ID", id, true, 128)?;
+    if !id
+        .chars()
+        .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
+    {
+        return Err("Profile ID contains unsupported characters.".into());
+    }
+    Ok(())
+}
+
+pub fn migrate_app_data(data: &mut AppData) -> bool {
+    if data.version >= 2 {
+        return false;
+    }
+
+    let assigned_profile_ids = data
+        .repositories
+        .iter()
+        .filter_map(|repository| repository.profile_id.clone())
+        .collect::<Vec<_>>();
+    data.profiles.retain(|profile| {
+        let is_seed = matches!(profile.id.as_str(), "personal" | "school")
+            && matches!(profile.label.as_str(), "Personal" | "School")
+            && profile.git_name.trim().is_empty()
+            && profile.git_email.trim().is_empty()
+            && profile
+                .github_username
+                .as_deref()
+                .unwrap_or_default()
+                .trim()
+                .is_empty()
+            && profile
+                .ssh_key_path
+                .as_deref()
+                .unwrap_or_default()
+                .trim()
+                .is_empty()
+            && profile
+                .gh_config_dir
+                .as_deref()
+                .unwrap_or_default()
+                .trim()
+                .is_empty();
+        let is_assigned = assigned_profile_ids.iter().any(|id| id == &profile.id);
+        !is_seed || is_assigned
+    });
+    data.version = 2;
+    true
+}
+
 fn validate_text(label: &str, value: &str, required: bool, max_len: usize) -> Result<(), String> {
     if required && value.trim().is_empty() {
         return Err(format!("{label} is required."));
@@ -177,7 +210,9 @@ fn validate_text(label: &str, value: &str, required: bool, max_len: usize) -> Re
 fn is_hex_color(value: &str) -> bool {
     value.len() == 7
         && value.starts_with('#')
-        && value[1..].chars().all(|character| character.is_ascii_hexdigit())
+        && value[1..]
+            .chars()
+            .all(|character| character.is_ascii_hexdigit())
 }
 
 #[cfg(test)]
@@ -210,5 +245,31 @@ mod tests {
         let mut profile = valid_profile();
         profile.git_name = "Unsafe\nName".into();
         assert!(validate_profile(&profile).is_err());
+    }
+
+    #[test]
+    fn migration_removes_only_unused_seed_profiles() {
+        let mut data = AppData {
+            version: 1,
+            profiles: vec![
+                Profile {
+                    id: "personal".into(),
+                    label: "Personal".into(),
+                    accent: "#d8a33f".into(),
+                    git_name: String::new(),
+                    git_email: String::new(),
+                    github_username: None,
+                    ssh_key_path: None,
+                    gh_config_dir: None,
+                },
+                valid_profile(),
+            ],
+            repositories: Vec::new(),
+        };
+
+        assert!(migrate_app_data(&mut data));
+        assert_eq!(data.version, 2);
+        assert_eq!(data.profiles.len(), 1);
+        assert_eq!(data.profiles[0].git_name, "Your Name");
     }
 }

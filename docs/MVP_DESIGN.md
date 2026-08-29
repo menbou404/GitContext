@@ -7,7 +7,7 @@ GitHubアカウントの「現在値」を切り替えるアプリではなく�
 ユーザーが行う判断は次の1つだけ。
 
 ```text
-このリポジトリ → Personal / School / 任意のProfile
+このリポジトリ → ユーザーが任意に作成したProfile
 ```
 
 Profileは次の参照と公開設定をまとめる。
@@ -30,9 +30,9 @@ Profileは次の参照と公開設定をまとめる。
 
 ### Profile editor
 
-- Profile名と色
+- 任意のProfile名と色（初期状態では固定Profileを作らない）
 - Git author name / email
-- GitHub username（任意）
+- GitHub CLIのブラウザ認証、接続状態確認、GitHub username
 - `~/.ssh` 内の既存秘密鍵（任意）
 - 既存のgh設定ディレクトリ（任意）
 - 「参照だけを保存する」ことを常時表示
@@ -74,19 +74,20 @@ AppData
 
 ## GitHub CLIの扱い
 
-`gh auth switch` は同じhostのグローバルなactive accountを書き換えるため、MVPでは自動実行しない。Profileには既存の `GH_CONFIG_DIR` だけを参照として持ち、プレビュー時に次の形で認証状態を確認する。
+`gh auth switch` は同じhostのグローバルなactive accountを書き換えるため、自動実行しない。各Profileには別々の `GH_CONFIG_DIR` を割り当てる。既存ディレクトリを選べるほか、Profile作成画面から次の固定引数でGitHub公式のブラウザ認証を開始できる。
 
 ```text
-GH_CONFIG_DIR=<profile directory> gh auth status --active --hostname github.com
+GH_CONFIG_DIR=<profile directory> gh auth login --hostname github.com --git-protocol ssh --web --clipboard --skip-ssh-key
 ```
 
-tokenを表示する `--show-token` は使わない。今後GitContext内から `gh` 操作を追加するときも、リポジトリのworking directoryとProfileの `GH_CONFIG_DIR` をプロセス環境へ渡す方式に統一する。一般の外部terminal全体を暗黙に書き換えることはしない。
+認証後は `gh api user --hostname github.com --jq .login` でユーザー名と接続状態を確認する。Profile用ディレクトリはユーザーのhome配下だけを許可し、token環境変数は子プロセスから除外する。tokenを表示する `--show-token` は使わない。今後GitContext内から `gh` 操作を追加するときも、リポジトリのworking directoryとProfileの `GH_CONFIG_DIR` をプロセス環境へ渡す方式に統一する。一般の外部terminal全体を暗黙に書き換えることはしない。
 
 ## MVPの範囲
 
 実装済み:
 
 - Profileの作成・編集・永続化
+- Profile作成時のGitHub CLIブラウザ認証と接続状態確認
 - Git repositoryの選択、検証、登録、削除
 - Profile割当の差分プレビュー
 - repository-local Git identity / SSH commandのtransactionalな適用
@@ -99,5 +100,5 @@ tokenを表示する `--show-token` は使わない。今後GitContext内から 
 - 適用履歴とワンクリックrollback
 - GitContext経由の `gh repo`, `gh pr`, `gh issue` 操作
 - リポジトリrootの一括scan
-- remote ownerとProfileのGitHub usernameが異なる場合の警告
+- remote ownerの自動検出とProfileのGitHub usernameとの照合
 - Profile export/import（参照情報のみ）

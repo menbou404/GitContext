@@ -13,6 +13,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::bootstrap,
             commands::save_profile,
+            commands::inspect_github_profile,
+            commands::connect_github_profile,
             commands::add_repository,
             commands::remove_repository,
             commands::preview_assignment,

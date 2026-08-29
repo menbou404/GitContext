@@ -1,7 +1,6 @@
 use std::{
     collections::BTreeMap,
-    env,
-    fs,
+    env, fs,
     path::{Path, PathBuf},
     process::{Command, Output},
 };
@@ -26,7 +25,11 @@ pub fn inspect_repository(input: &str) -> Result<RepositoryRecord, String> {
     })
 }
 
-pub fn build_preview(repository: &RepositoryRecord, profile: &Profile, gh_available: bool) -> Result<ApplyPreview, String> {
+pub fn build_preview(
+    repository: &RepositoryRecord,
+    profile: &Profile,
+    gh_available: bool,
+) -> Result<ApplyPreview, String> {
     let root = repository_root(&repository.path)?;
     let desired = desired_config(profile)?;
     let changes = desired
@@ -40,7 +43,8 @@ pub fn build_preview(repository: &RepositoryRecord, profile: &Profile, gh_availa
 
     let mut warnings = Vec::new();
     if profile.gh_config_dir.is_some() && !gh_available {
-        warnings.push("GitHub CLI is not installed, so gh integration will remain inactive.".into());
+        warnings
+            .push("GitHub CLI is not installed, so gh integration will remain inactive.".into());
     }
     if let Some(directory) = &profile.gh_config_dir {
         if !Path::new(directory).is_dir() {
@@ -70,7 +74,9 @@ pub fn apply_profile(repository: &RepositoryRecord, profile: &Profile) -> Result
             for changed in changed_keys.iter().rev() {
                 restore_local_config(&root, changed, previous.get(changed).cloned().flatten());
             }
-            return Err(format!("No changes were kept because Git rejected {key}: {error}"));
+            return Err(format!(
+                "No changes were kept because Git rejected {key}: {error}"
+            ));
         }
         changed_keys.push(key.clone());
     }
@@ -132,7 +138,8 @@ fn validate_ssh_private_key(input: &str) -> Result<PathBuf, String> {
     if !key.is_file() {
         return Err("The selected SSH key is not a regular file.".into());
     }
-    let home = home_directory().ok_or_else(|| "Could not locate the user home directory.".to_string())?;
+    let home =
+        home_directory().ok_or_else(|| "Could not locate the user home directory.".to_string())?;
     let ssh_root = fs::canonicalize(home.join(".ssh"))
         .map_err(|error| format!("The ~/.ssh directory is not accessible: {error}"))?;
     if !key.starts_with(&ssh_root) {
@@ -145,7 +152,10 @@ fn expand_home(input: &str) -> PathBuf {
     if input == "~" {
         return home_directory().unwrap_or_else(|| PathBuf::from(input));
     }
-    if let Some(remainder) = input.strip_prefix("~/").or_else(|| input.strip_prefix("~\\")) {
+    if let Some(remainder) = input
+        .strip_prefix("~/")
+        .or_else(|| input.strip_prefix("~\\"))
+    {
         if let Some(home) = home_directory() {
             return home.join(remainder);
         }

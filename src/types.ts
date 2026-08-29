@@ -45,6 +45,14 @@ export interface BootstrapResult {
   demoMode: boolean;
 }
 
+export interface GhProfileStatus {
+  available: boolean;
+  authenticated: boolean;
+  username?: string | null;
+  detail?: string | null;
+  configDir?: string | null;
+}
+
 export interface ConfigChange {
   key: string;
   currentValue?: string | null;

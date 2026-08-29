@@ -23,10 +23,14 @@ pub fn load(app: &AppHandle) -> Result<AppData, String> {
         save(app, &initial)?;
         return Ok(initial);
     }
-    let bytes = fs::read(&path)
-        .map_err(|error| format!("Could not read {}: {error}", path.display()))?;
-    serde_json::from_slice(&bytes)
-        .map_err(|error| format!("GitContext settings are invalid JSON: {error}"))
+    let bytes =
+        fs::read(&path).map_err(|error| format!("Could not read {}: {error}", path.display()))?;
+    let mut data: AppData = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("GitContext settings are invalid JSON: {error}"))?;
+    if crate::models::migrate_app_data(&mut data) {
+        save(app, &data)?;
+    }
+    Ok(data)
 }
 
 pub fn save(app: &AppHandle, data: &AppData) -> Result<(), String> {
@@ -58,8 +62,9 @@ pub fn save(app: &AppHandle, data: &AppData) -> Result<(), String> {
         return Err(format!("Could not activate the new settings file: {error}"));
     }
     if backup.exists() {
-        fs::remove_file(&backup)
-            .map_err(|error| format!("Settings were saved, but their temporary backup could not be removed: {error}"))?;
+        fs::remove_file(&backup).map_err(|error| {
+            format!("Settings were saved, but their temporary backup could not be removed: {error}")
+        })?;
     }
     Ok(())
 }
