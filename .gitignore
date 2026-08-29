@@ -11,6 +11,17 @@ node_modules
 dist
 dist-ssr
 *.local
+/src-tauri/target/
+
+# Local environment and signing material
+.env
+.env.*
+!.env.example
+*.pfx
+*.p12
+*.pem
+*.key
+certificate/
 
 # Editor directories and files
 .vscode/*

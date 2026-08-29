@@ -1,0 +1,23 @@
+name: Feature request
+description: Suggest an improvement for GitContext
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What workflow or difficulty should this feature improve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+    validations:
+      required: true
+  - type: textarea
+    id: safety
+    attributes:
+      label: Security and safety considerations
+      description: Note any impact on credentials, SSH keys, Git config, or external commands.
