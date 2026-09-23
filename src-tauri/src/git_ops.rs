@@ -25,6 +25,52 @@ pub fn inspect_repository(input: &str) -> Result<RepositoryRecord, String> {
     })
 }
 
+pub fn clone_repository(
+    repository_url: &str,
+    repository_name: &str,
+    destination_parent: &str,
+    profile: &Profile,
+) -> Result<RepositoryRecord, String> {
+    let parent = fs::canonicalize(expand_home(destination_parent))
+        .map_err(|error| format!("Clone destination is not accessible: {error}"))?;
+    if !parent.is_dir() {
+        return Err("Clone destination must be an existing directory.".into());
+    }
+
+    let destination = parent.join(repository_name);
+    if destination.exists() {
+        return Err(format!(
+            "The clone destination already exists: {}",
+            destination.display()
+        ));
+    }
+
+    let ssh_command = desired_config(profile)?
+        .into_iter()
+        .find_map(|(key, value)| (key == "core.sshCommand").then_some(value))
+        .ok_or_else(|| "Choose an SSH private key for this Profile before cloning.".to_string())?;
+    let destination_text = destination.to_string_lossy().into_owned();
+    let output = Command::new("git")
+        .current_dir(&parent)
+        .arg("-c")
+        .arg(format!("core.sshCommand={ssh_command}"))
+        .args(["clone", "--", repository_url, destination_text.as_str()])
+        .output()
+        .map_err(|error| format!("Could not start Git clone: {error}"))?;
+    if !output.status.success() {
+        let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if detail.is_empty() {
+            format!("Git clone exited with {}.", output.status)
+        } else {
+            detail
+        });
+    }
+
+    let repository = inspect_repository(&destination_text)?;
+    apply_profile(&repository, profile)?;
+    Ok(repository)
+}
+
 pub fn build_preview(
     repository: &RepositoryRecord,
     profile: &Profile,

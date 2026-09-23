@@ -41,6 +41,15 @@ Profileは次の参照と公開設定をまとめる。
 
 書き込みの前にキー単位で現在値と予定値を表示する。ユーザーが明示的に確認した場合だけ適用する。
 
+### GitHub clone
+
+- 最初にProfileを選び、そのProfile専用の`GH_CONFIG_DIR`でアクセス可能なリポジトリを最大100件表示する
+- 一覧にないリポジトリ向けに`git@github.com:owner/repository.git`形式のSSH URL直接入力も提供する
+- ユーザーが既存の保存先親フォルダーを明示的に選択する
+- clone時からProfileのSSH秘密鍵を`core.sshCommand`で明示し、既定鍵へフォールバックしない
+- clone完了後、同じProfileのGit author、SSH鍵、GitHub CLI参照をrepository-local設定へ適用してGitContextへ登録する
+- 保存先が既に存在する場合は上書きしない
+
 ### GitHub publish
 
 - 接続済みかつ適用済みのProfileだけを使用する
@@ -98,6 +107,7 @@ GitHub CLIが発行したワンタイムコードはTauri eventで認証中の�
 - Profileの作成・編集・永続化
 - Profile作成時のGitHub CLIブラウザ認証と接続状態確認
 - Git repositoryの選択、検証、登録、削除
+- Profile別GitHubリポジトリ一覧、SSH URL直接入力、clone、自動Profile適用
 - Profile割当の差分プレビュー
 - repository-local Git identity / SSH commandのtransactionalな適用
 - Git / gh / SSHの環境検出

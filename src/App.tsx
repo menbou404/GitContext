@@ -3,12 +3,15 @@ import {
   addRepository,
   applyAssignment,
   bootstrap,
+  chooseCloneDestinationDirectory,
   chooseGhConfigDirectory,
   chooseRepositoryDirectory,
   chooseSshKey,
+  cloneGithubRepository,
   connectGithubProfile,
   inspectGithubProfile,
   listenForGithubAuthPrompt,
+  listGithubRepositories,
   openGithubAuthPage,
   previewAssignment,
   publishRepository,
@@ -31,7 +34,7 @@ import {
   TerminalIcon,
   TrashIcon,
 } from "./Icons";
-import type { AppData, ApplyPreview, BootstrapResult, GhProfileStatus, GithubAuthPrompt, Profile, PublishOptions, RepositoryRecord, RepositoryVisibility } from "./types";
+import type { AppData, ApplyPreview, BootstrapResult, CloneOptions, GhProfileStatus, GithubAuthPrompt, GithubRepository, Profile, PublishOptions, RepositoryRecord, RepositoryVisibility } from "./types";
 import { compactPath, initials, profileIsComplete } from "./types";
 import { localizeRuntimeMessage, uiCopy, type Locale } from "./i18n";
 import "./App.css";
@@ -495,6 +498,183 @@ function PublishDialog({
   );
 }
 
+function CloneDialog({
+  profiles,
+  locale,
+  onClose,
+  onClone,
+}: {
+  profiles: Profile[];
+  locale: Locale;
+  onClose: () => void;
+  onClone: (options: CloneOptions) => Promise<void>;
+}) {
+  const copy = uiCopy[locale];
+  const firstProfile = profiles.find((profile) => profileIsComplete(profile) && profile.sshKeyPath) ?? profiles[0];
+  const [profileId, setProfileId] = useState(firstProfile?.id ?? "");
+  const [source, setSource] = useState<"list" | "url">("list");
+  const [repositories, setRepositories] = useState<GithubRepository[]>([]);
+  const [selectedUrl, setSelectedUrl] = useState("");
+  const [manualUrl, setManualUrl] = useState("");
+  const [destinationParent, setDestinationParent] = useState("");
+  const [repositoryQuery, setRepositoryQuery] = useState("");
+  const [loadingRepositories, setLoadingRepositories] = useState(false);
+  const [repositoryError, setRepositoryError] = useState<string | null>(null);
+  const [cloning, setCloning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const profile = profiles.find((item) => item.id === profileId) ?? null;
+
+  const loadRepositories = async () => {
+    if (!profileId || !profile?.githubUsername || !profile.ghConfigDir) {
+      setRepositories([]);
+      setSelectedUrl("");
+      setRepositoryError(null);
+      return;
+    }
+    setLoadingRepositories(true);
+    setRepositoryError(null);
+    try {
+      const next = await listGithubRepositories(profileId);
+      setRepositories(next);
+      setSelectedUrl((current) => next.some((item) => item.sshUrl === current) ? current : "");
+    } catch (cause) {
+      setRepositories([]);
+      setSelectedUrl("");
+      setRepositoryError(messageFrom(cause, locale));
+    } finally {
+      setLoadingRepositories(false);
+    }
+  };
+
+  useEffect(() => {
+    if (source === "list") void loadRepositories();
+    // The selected Profile is the complete dependency for this one-shot fetch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profileId, source]);
+
+  const filteredRepositories = useMemo(() => {
+    const term = repositoryQuery.trim().toLowerCase();
+    if (!term) return repositories;
+    return repositories.filter((repository) =>
+      [repository.nameWithOwner, repository.description ?? ""].some((value) => value.toLowerCase().includes(term)),
+    );
+  }, [repositories, repositoryQuery]);
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!profile) return;
+    setError(null);
+    setCloning(true);
+    try {
+      await onClone({
+        profileId: profile.id,
+        repositoryUrl: source === "list" ? selectedUrl : manualUrl,
+        destinationParent,
+      });
+    } catch (cause) {
+      setError(messageFrom(cause, locale));
+      setCloning(false);
+    }
+  };
+
+  const profileReady = Boolean(profile && profileIsComplete(profile) && profile.sshKeyPath);
+  const sourceUrl = source === "list" ? selectedUrl : manualUrl.trim();
+  const canSubmit = profileReady && Boolean(sourceUrl) && Boolean(destinationParent.trim()) && !cloning;
+
+  return (
+    <div className="modal-layer" role="presentation" onMouseDown={onClose}>
+      <form className="modal clone-modal" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}>
+        <div className="modal-header">
+          <div>
+            <p className="eyebrow">GitHub</p>
+            <h2>{copy.cloneRepositoryTitle}</h2>
+          </div>
+          <button className="icon-button" type="button" onClick={onClose} aria-label={copy.close}><CloseIcon /></button>
+        </div>
+        <p className="modal-lead">{copy.cloneRepositoryLead}</p>
+
+        <label className="field">
+          <span>{copy.cloneProfile}</span>
+          <select value={profileId} onChange={(event) => setProfileId(event.currentTarget.value)}>
+            <option value="" disabled>{copy.selectProfile}</option>
+            {profiles.map((item) => (
+              <option value={item.id} key={item.id} disabled={!profileIsComplete(item) || !item.sshKeyPath}>
+                {item.label}{item.githubUsername ? ` — @${item.githubUsername}` : ""}
+              </option>
+            ))}
+          </select>
+        </label>
+        {!profiles.some((item) => profileIsComplete(item) && item.sshKeyPath) && <div className="warning-note"><AlertIcon />{copy.noCloneProfiles}</div>}
+        {profile && !profile.sshKeyPath && <div className="warning-note"><AlertIcon />{copy.profileNeedsSsh}</div>}
+
+        <div className="clone-source-tabs" role="tablist">
+          <button className={source === "list" ? "active" : ""} type="button" onClick={() => setSource("list")}>{copy.chooseFromGithub}</button>
+          <button className={source === "url" ? "active" : ""} type="button" onClick={() => setSource("url")}>{copy.enterSshUrl}</button>
+        </div>
+
+        {source === "list" ? (
+          <section className="clone-source-panel">
+            {!profile?.githubUsername || !profile.ghConfigDir ? (
+              <div className="warning-note"><AlertIcon />{copy.profileNeedsGithub}</div>
+            ) : (
+              <>
+                <div className="clone-list-toolbar">
+                  <div className="search-box"><SearchIcon /><input value={repositoryQuery} onChange={(event) => setRepositoryQuery(event.currentTarget.value)} placeholder={copy.cloneSearch} /></div>
+                  <button className="button button--ghost" type="button" onClick={loadRepositories} disabled={loadingRepositories}>{copy.refreshRepositories}</button>
+                </div>
+                {loadingRepositories ? (
+                  <p className="clone-list-message">{copy.loadingRepositories}</p>
+                ) : repositoryError ? (
+                  <div className="inline-error"><AlertIcon />{repositoryError}</div>
+                ) : filteredRepositories.length ? (
+                  <div className="github-repository-list">
+                    {filteredRepositories.map((repository) => (
+                      <button className={selectedUrl === repository.sshUrl ? "selected" : ""} type="button" key={repository.sshUrl} onClick={() => setSelectedUrl(repository.sshUrl)}>
+                        <span><strong>{repository.nameWithOwner}</strong><small>{repository.description || repository.sshUrl}</small></span>
+                        <em>{repository.isPrivate ? copy.privateLabel : copy.publicLabel}</em>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="clone-list-message">{copy.noGithubRepositories}</p>
+                )}
+              </>
+            )}
+          </section>
+        ) : (
+          <section className="clone-source-panel">
+            <label className="field">
+              <span>{copy.sshCloneUrl}</span>
+              <input required={source === "url"} value={manualUrl} onChange={(event) => setManualUrl(event.currentTarget.value)} placeholder="git@github.com:owner/repository.git" spellCheck={false} />
+              <small className="field-help">{copy.sshCloneUrlHelp}</small>
+            </label>
+          </section>
+        )}
+
+        <label className="field clone-destination-field">
+          <span>{copy.cloneDestination}</span>
+          <div className="path-input">
+            <input required value={destinationParent} onChange={(event) => setDestinationParent(event.currentTarget.value)} placeholder="C:\\Users\\you\\Projects" />
+            <button type="button" onClick={async () => { const path = await chooseCloneDestinationDirectory(copy.selectCloneDestinationDialog); if (path) setDestinationParent(path); }}>{copy.selectCloneDestination}</button>
+          </div>
+        </label>
+
+        {profileReady && sourceUrl && destinationParent && (
+          <div className="clone-summary">
+            <ProfileAvatar profile={profile!} />
+            <div><strong>{profile!.label}{profile!.githubUsername ? ` · @${profile!.githubUsername}` : ""}</strong><span>{sourceUrl}</span><small>{destinationParent}</small></div>
+          </div>
+        )}
+        {error && <div className="inline-error"><AlertIcon />{error}</div>}
+        <div className="modal-actions">
+          <button className="button button--ghost" type="button" onClick={onClose} disabled={cloning}>{copy.cancel}</button>
+          <button className="button button--primary" type="submit" disabled={!canSubmit}>{cloning ? copy.cloning : copy.cloneAndApply}</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 function App({ locale = "en" }: { locale?: Locale }) {
   const copy = uiCopy[locale];
   const [result, setResult] = useState<BootstrapResult | null>(null);
@@ -505,6 +685,7 @@ function App({ locale = "en" }: { locale?: Locale }) {
   const [selectedRepositoryId, setSelectedRepositoryId] = useState<string | null>(null);
   const [pendingProfileId, setPendingProfileId] = useState("");
   const [editingProfile, setEditingProfile] = useState<EditingProfile | null>(null);
+  const [cloneOpen, setCloneOpen] = useState(false);
   const [preview, setPreview] = useState<ApplyPreview | null>(null);
   const [publishTarget, setPublishTarget] = useState<{ repository: RepositoryRecord; profile: Profile } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -600,6 +781,17 @@ function App({ locale = "en" }: { locale?: Locale }) {
     updateData(published.data);
     setPublishTarget(null);
     setNotice(copy.repositoryPublished(published.repositoryUrl));
+  };
+
+  const cloneRepositoryAction = async (options: CloneOptions) => {
+    const cloned = await cloneGithubRepository(options);
+    const profile = cloned.data.profiles.find((item) => item.id === options.profileId);
+    updateData(cloned.data);
+    setCloneOpen(false);
+    setProfileFilter(null);
+    setSelectedRepositoryId(cloned.repository.id);
+    setPendingProfileId(options.profileId);
+    setNotice(copy.repositoryCloned(cloned.repository.name, profile?.label ?? "Profile"));
   };
 
   const removeSelected = async () => {
@@ -700,7 +892,10 @@ function App({ locale = "en" }: { locale?: Locale }) {
               <h1>{copy.heroTitle}</h1>
               <p>{copy.heroDescription}</p>
             </div>
-            <button className="button button--primary button--add" onClick={addRepo} disabled={busy}><PlusIcon />{copy.addRepository}</button>
+            <div className="hero-actions">
+              <button className="button button--ghost button--add" onClick={() => setCloneOpen(true)} disabled={busy}><BranchIcon />{copy.cloneRepository}</button>
+              <button className="button button--primary button--add" onClick={addRepo} disabled={busy}><PlusIcon />{copy.addRepository}</button>
+            </div>
           </section>
 
           <section className="summary-grid" aria-label={copy.workspaceSummary}>
@@ -789,6 +984,7 @@ function App({ locale = "en" }: { locale?: Locale }) {
       </div>
 
       {editingProfile && <ProfileEditor initial={editingProfile.profile} creating={editingProfile.creating} ghAvailable={environment.gh.available} locale={locale} onClose={() => setEditingProfile(null)} onSave={saveProfileAction} />}
+      {cloneOpen && <CloneDialog profiles={data.profiles} locale={locale} onClose={() => setCloneOpen(false)} onClone={cloneRepositoryAction} />}
       {preview && <ApplyDialog preview={preview} locale={locale} onClose={() => setPreview(null)} onApply={applyProfileAction} />}
       {publishTarget && <PublishDialog repository={publishTarget.repository} profile={publishTarget.profile} locale={locale} onClose={() => setPublishTarget(null)} onPublish={publishRepositoryAction} />}
     </div>

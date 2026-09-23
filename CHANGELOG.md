@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- ProfileのGitHub一覧またはSSH URLからcloneし、同じIdentityを自動適用するフロー
+
 ### Planned
 
 - 適用履歴とワンクリックrollback

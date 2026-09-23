@@ -74,6 +74,26 @@ export interface PublishResult {
   repositoryUrl: string;
 }
 
+export interface GithubRepository {
+  name: string;
+  nameWithOwner: string;
+  description?: string | null;
+  isPrivate: boolean;
+  sshUrl: string;
+  updatedAt: string;
+}
+
+export interface CloneOptions {
+  profileId: string;
+  repositoryUrl: string;
+  destinationParent: string;
+}
+
+export interface CloneResult {
+  data: AppData;
+  repository: RepositoryRecord;
+}
+
 export interface ConfigChange {
   key: string;
   currentValue?: string | null;

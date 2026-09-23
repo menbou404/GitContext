@@ -6,7 +6,10 @@ import type {
   AppData,
   ApplyPreview,
   BootstrapResult,
+  CloneOptions,
+  CloneResult,
   GhProfileStatus,
+  GithubRepository,
   GithubAuthPrompt,
   Profile,
   PublishOptions,
@@ -31,6 +34,18 @@ export async function bootstrap(): Promise<BootstrapResult> {
 export async function chooseRepositoryDirectory(title = "Select a Git repository"): Promise<string | null> {
   if (!inDesktopApp()) {
     return "C:\\Users\\you\\Projects\\new-project";
+  }
+  const selected = await open({
+    directory: true,
+    multiple: false,
+    title,
+  });
+  return typeof selected === "string" ? selected : null;
+}
+
+export async function chooseCloneDestinationDirectory(title = "Select a clone destination"): Promise<string | null> {
+  if (!inDesktopApp()) {
+    return "C:\\Users\\you\\Projects";
   }
   const selected = await open({
     directory: true,
@@ -89,6 +104,52 @@ export async function removeRepository(id: string): Promise<AppData> {
     return structuredClone(demoState);
   }
   return invoke<AppData>("remove_repository", { id });
+}
+
+export async function listGithubRepositories(profileId: string): Promise<GithubRepository[]> {
+  if (!inDesktopApp()) {
+    const profile = demoState.profiles.find((item) => item.id === profileId);
+    if (!profile) throw new Error("Profile was not found.");
+    const owner = profile.githubUsername || "connected-account";
+    return [
+      {
+        name: "example-project",
+        nameWithOwner: `${owner}/example-project`,
+        description: "Repository available to the selected Profile",
+        isPrivate: true,
+        sshUrl: `git@github.com:${owner}/example-project.git`,
+        updatedAt: new Date().toISOString(),
+      },
+    ];
+  }
+  return invoke<GithubRepository[]>("list_github_repositories", { profileId });
+}
+
+export async function cloneGithubRepository(options: CloneOptions): Promise<CloneResult> {
+  if (!inDesktopApp()) {
+    const profile = demoState.profiles.find((item) => item.id === options.profileId);
+    if (!profile) throw new Error("Profile was not found.");
+    const match = options.repositoryUrl.trim().match(/^git@github\.com:[A-Za-z0-9-]+\/([A-Za-z0-9._-]+)\.git$/);
+    if (!match) throw new Error("Use a GitHub SSH URL in the form git@github.com:owner/repository.git.");
+    const name = match[1];
+    const separator = options.destinationParent.includes("\\") ? "\\" : "/";
+    const repository: RepositoryRecord = {
+      id: nextDemoId("repo"),
+      name,
+      path: `${options.destinationParent.replace(/[\\/]$/, "")}${separator}${name}`,
+      remoteUrl: options.repositoryUrl.trim(),
+      branch: "main",
+      profileId: profile.id,
+      lastAppliedAt: new Date().toISOString(),
+    };
+    demoState.repositories = [...demoState.repositories, repository];
+    return { data: structuredClone(demoState), repository: structuredClone(repository) };
+  }
+  return invoke<CloneResult>("clone_repository", {
+    profileId: options.profileId,
+    repositoryUrl: options.repositoryUrl,
+    destinationParent: options.destinationParent,
+  });
 }
 
 export async function saveProfile(profile: Profile): Promise<AppData> {
