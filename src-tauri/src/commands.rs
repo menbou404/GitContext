@@ -11,15 +11,15 @@ use std::{
 };
 
 use chrono::Utc;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 
 use crate::{
     git_ops,
     models::{
         normalize_profile, validate_profile, validate_profile_id, AppData, ApplyPreview,
-        BootstrapResult, EnvironmentStatus, GhProfileStatus, Profile, PublishResult,
-        RepositoryRecord, ToolStatus,
+        BootstrapResult, CloneResult, EnvironmentStatus, GhProfileStatus, GithubRepository,
+        Profile, PublishResult, RepositoryRecord, ToolStatus,
     },
     storage,
 };
@@ -35,6 +35,16 @@ struct GithubAuthPrompt {
     profile_id: String,
     code: String,
     verification_url: &'static str,
+}
+
+#[derive(Deserialize)]
+struct GithubApiRepository {
+    name: String,
+    full_name: String,
+    description: Option<String>,
+    private: bool,
+    ssh_url: String,
+    updated_at: String,
 }
 
 #[tauri::command]
@@ -192,6 +202,136 @@ pub fn add_repository(
     data.repositories.push(candidate.clone());
     storage::save(&app, &data)?;
     Ok(candidate)
+}
+
+#[tauri::command]
+pub async fn list_github_repositories(
+    app: AppHandle,
+    gate: State<'_, AppGate>,
+    profile_id: String,
+) -> Result<Vec<GithubRepository>, String> {
+    let profile = {
+        let _guard = gate
+            .0
+            .lock()
+            .map_err(|_| "GitContext's state lock is unavailable.")?;
+        let data = storage::load(&app)?;
+        data.profiles
+            .iter()
+            .find(|item| item.id == profile_id)
+            .cloned()
+            .ok_or_else(|| "Profile was not found.".to_string())?
+    };
+    validate_profile(&profile)?;
+    let directory = resolve_gh_config_dir(&app, &profile.id, profile.gh_config_dir.as_deref())?;
+    let status = inspect_gh_directory(&directory);
+    let actual = status
+        .username
+        .filter(|_| status.authenticated)
+        .ok_or_else(|| {
+            status.detail.unwrap_or_else(|| {
+                "Connect this Profile to GitHub before listing repositories.".into()
+            })
+        })?;
+    if let Some(expected) = profile.github_username.as_deref() {
+        if !expected.eq_ignore_ascii_case(&actual) {
+            return Err(format!(
+                "The Profile expects @{expected}, but GitHub CLI is authenticated as @{actual}."
+            ));
+        }
+    }
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let output = gh_command(&directory)
+            .args([
+                "api",
+                "user/repos?affiliation=owner,collaborator,organization_member&per_page=100&sort=updated&direction=desc",
+            ])
+            .output()
+            .map_err(|error| format!("Could not list GitHub repositories: {error}"))?;
+        if !output.status.success() {
+            let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            return Err(if detail.is_empty() {
+                format!("GitHub CLI exited with {}.", output.status)
+            } else {
+                detail
+            });
+        }
+        let repositories: Vec<GithubApiRepository> = serde_json::from_slice(&output.stdout)
+            .map_err(|error| format!("GitHub returned an invalid repository list: {error}"))?;
+        Ok(repositories
+            .into_iter()
+            .map(|repository| GithubRepository {
+                name: repository.name,
+                name_with_owner: repository.full_name,
+                description: repository.description,
+                is_private: repository.private,
+                ssh_url: repository.ssh_url,
+                updated_at: repository.updated_at,
+            })
+            .collect())
+    })
+    .await
+    .map_err(|error| format!("GitHub repository listing task failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn clone_repository(
+    app: AppHandle,
+    gate: State<'_, AppGate>,
+    profile_id: String,
+    repository_url: String,
+    destination_parent: String,
+) -> Result<CloneResult, String> {
+    let (repository_url, repository_name) = validate_github_ssh_url(&repository_url)?;
+    let profile = {
+        let _guard = gate
+            .0
+            .lock()
+            .map_err(|_| "GitContext's state lock is unavailable.")?;
+        let data = storage::load(&app)?;
+        let profile = data
+            .profiles
+            .iter()
+            .find(|item| item.id == profile_id)
+            .cloned()
+            .ok_or_else(|| "Profile was not found.".to_string())?;
+        validate_profile(&profile)?;
+        profile
+    };
+
+    let cloned_profile = profile.clone();
+    let mut repository = tauri::async_runtime::spawn_blocking(move || {
+        git_ops::clone_repository(
+            &repository_url,
+            &repository_name,
+            &destination_parent,
+            &cloned_profile,
+        )
+    })
+    .await
+    .map_err(|error| format!("Git clone task failed: {error}"))??;
+
+    repository.profile_id = Some(profile.id.clone());
+    repository.last_applied_at = Some(Utc::now().to_rfc3339());
+    let data = {
+        let _guard = gate
+            .0
+            .lock()
+            .map_err(|_| "GitContext's state lock is unavailable.")?;
+        let mut data = storage::load(&app)?;
+        if data
+            .repositories
+            .iter()
+            .any(|item| item.path == repository.path)
+        {
+            return Err("The cloned repository is already registered in GitContext.".into());
+        }
+        data.repositories.push(repository.clone());
+        storage::save(&app, &data)?;
+        data
+    };
+    Ok(CloneResult { data, repository })
 }
 
 #[tauri::command]
@@ -403,6 +543,35 @@ fn validate_github_repository_name(value: &str) -> Result<String, String> {
         return Err("GitHub repository name contains unsupported characters.".into());
     }
     Ok(value.to_string())
+}
+
+fn validate_github_ssh_url(value: &str) -> Result<(String, String), String> {
+    let value = value.trim();
+    let path = value
+        .strip_prefix("git@github.com:")
+        .and_then(|value| value.strip_suffix(".git"))
+        .ok_or_else(|| {
+            "Use a GitHub SSH URL in the form git@github.com:owner/repository.git.".to_string()
+        })?;
+    let mut parts = path.split('/');
+    let owner = parts.next().unwrap_or_default();
+    let repository = parts.next().unwrap_or_default();
+    if parts.next().is_some()
+        || owner.is_empty()
+        || owner.len() > 100
+        || owner.starts_with('-')
+        || owner.ends_with('-')
+        || !owner
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || character == '-')
+    {
+        return Err("The GitHub owner in the SSH URL is invalid.".into());
+    }
+    let repository = validate_github_repository_name(repository)?;
+    Ok((
+        format!("git@github.com:{owner}/{repository}.git"),
+        repository,
+    ))
 }
 
 fn validate_github_description(value: Option<String>) -> Result<Option<String>, String> {
@@ -651,7 +820,9 @@ fn inspect_gh_directory(directory: &Path) -> GhProfileStatus {
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_github_device_code, validate_github_repository_name};
+    use super::{
+        extract_github_device_code, validate_github_repository_name, validate_github_ssh_url,
+    };
 
     #[test]
     fn extracts_github_device_code_without_logging_the_line() {
@@ -670,5 +841,21 @@ mod tests {
         );
         assert!(validate_github_repository_name("owner/repository").is_err());
         assert!(validate_github_repository_name("unsafe name").is_err());
+    }
+
+    #[test]
+    fn validates_and_normalizes_github_ssh_urls() {
+        assert_eq!(
+            validate_github_ssh_url(" git@github.com:student-user/course-project.git ").unwrap(),
+            (
+                "git@github.com:student-user/course-project.git".into(),
+                "course-project".into()
+            )
+        );
+        assert!(
+            validate_github_ssh_url("git\\@github.com:student-user/course-project.git").is_err()
+        );
+        assert!(validate_github_ssh_url("https://github.com/owner/repo.git").is_err());
+        assert!(validate_github_ssh_url("git@github.com:owner/group/repo.git").is_err());
     }
 }

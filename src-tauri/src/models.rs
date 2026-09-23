@@ -110,6 +110,24 @@ pub struct PublishResult {
     pub repository_url: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GithubRepository {
+    pub name: String,
+    pub name_with_owner: String,
+    pub description: Option<String>,
+    pub is_private: bool,
+    pub ssh_url: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloneResult {
+    pub data: AppData,
+    pub repository: RepositoryRecord,
+}
+
 pub fn clean_optional(value: Option<String>) -> Option<String> {
     value.and_then(|item| {
         let trimmed = item.trim().to_string();

@@ -17,6 +17,7 @@ GitContextは、複数のGitHub作業Identityをリポジトリ単位で割り�
 - ProfileごとにGitHub CLIのブラウザ認証を分離
 - Gitの`user.name` / `user.email`と既存SSH鍵をまとめて管理
 - リポジトリごとのProfile割り当てと適用前レビュー
+- ProfileのGitHub一覧またはSSH URLから安全にcloneし、自動でIdentityを適用
 - repository-localな`.git/config`だけを更新
 - GitHubリポジトリ作成、`origin`設定、初回push
 - 日本語・英語UI
@@ -38,7 +39,7 @@ GitContextは認証tokenやSSH秘密鍵の内容を保存しません。GitHub C
 1. Profileを作成し、Gitの作成者名とメールアドレスを入力
 2. 「GitHubと紐付ける」から対象アカウントを認証
 3. 必要に応じて既存SSH秘密鍵を選択
-4. ローカルGitリポジトリを追加
+4. GitHubからcloneするか、既存のローカルGitリポジトリを追加
 5. Profileを選び、変更内容を確認して適用
 6. 未公開リポジトリは「GitHubに公開」から作成・push
 
@@ -50,6 +51,7 @@ GitContextは認証tokenやSSH秘密鍵の内容を保存しません。GitHub C
 - SSH鍵は`~/.ssh`内の既存秘密鍵だけを参照する
 - Git設定は適用前にキー単位で差分を表示する
 - GitHub公開は既存`origin`や未コミット変更がある場合に拒否する
+- clone URLは`git@github.com:owner/repository.git`形式だけを受け付け、選択ProfileのSSH鍵を明示する
 - 複数Git設定の途中失敗時は元の値へロールバックする
 
 詳細は[docs/MVP_DESIGN.md](docs/MVP_DESIGN.md)を参照してください。脆弱性の報告方法は[SECURITY.md](SECURITY.md)に記載しています。
