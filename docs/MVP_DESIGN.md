@@ -59,6 +59,24 @@ Profileは次の参照と公開設定をまとめる。
 - 既存の`origin`、未コミット変更、コミットのないリポジトリ、detached HEADは拒否する
 - フロントエンドから任意のshell文字列を受け取らず、Rust側で検証した固定引数だけを`gh repo create`へ渡す
 
+### GitHub push
+
+- Profile適用済みかつ`git@github.com:owner/repository.git`形式のoriginを持つリポジトリだけを対象にする
+- 実行前にProfile、origin、現在ブランチ、追跡ブランチを表示する
+- 未コミット変更がある場合は、それらがpushに含まれないことを警告する
+- 実行するのは現在ブランチへの通常の`git push --set-upstream`だけとし、force push、タグ、任意refspecは受け付けない
+- Profile IDと`core.sshCommand`がrepository-local設定と一致しない場合は、Profileの再適用を要求する
+
+### Git commit
+
+- 実行前に適用済みProfile、実際の現在ブランチ、変更ファイル一覧を表示する
+- 「commitのみ」と「commitしてpush」を同じ画面から選べる
+- MVPでは`git add --all`により、表示した新規・変更・削除ファイルを一括して対象にする
+- コミットメッセージは空文字、改行、200文字超過を拒否する
+- Profile ID、`user.name`、`user.email`がrepository-local設定と一致しない場合はProfileの再適用を要求する
+- commit後のpushに失敗しても作成済みcommitは取り消さず、ローカルに残っていることを明示する
+- detached HEADは拒否し、未作成の初回ブランチは最初のcommitに対応する
+
 ## データモデル
 
 ```text
@@ -113,6 +131,8 @@ GitHub CLIが発行したワンタイムコードはTauri eventで認証中の�
 - Git / gh / SSHの環境検出
 - Profile別gh設定の非秘密な認証状態確認
 - GitHub公開前レビュー、リポジトリ作成、origin設定、初回push
+- 適用済みProfileによる既存GitHubリポジトリの現在ブランチpush
+- 現在ブランチと変更一覧を確認する一括commit、およびcommit後の通常push
 - ブラウザ用interactive previewとフロントエンドテスト
 
 次の候補:

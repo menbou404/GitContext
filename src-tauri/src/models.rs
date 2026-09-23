@@ -128,6 +128,51 @@ pub struct CloneResult {
     pub repository: RepositoryRecord,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PushPreview {
+    pub repository: RepositoryRecord,
+    pub profile: Profile,
+    pub branch: String,
+    pub remote_url: String,
+    pub upstream: Option<String>,
+    pub has_uncommitted_changes: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PushResult {
+    pub branch: String,
+    pub remote_url: String,
+    pub detail: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkingTreeChange {
+    pub status: String,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitPreview {
+    pub repository: RepositoryRecord,
+    pub profile: Profile,
+    pub branch: String,
+    pub changes: Vec<WorkingTreeChange>,
+    pub push_remote_url: Option<String>,
+    pub push_unavailable_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitResult {
+    pub branch: String,
+    pub commit_id: String,
+    pub message: String,
+}
+
 pub fn clean_optional(value: Option<String>) -> Option<String> {
     value.and_then(|item| {
         let trimmed = item.trim().to_string();

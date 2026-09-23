@@ -8,12 +8,16 @@ import type {
   BootstrapResult,
   CloneOptions,
   CloneResult,
+  CommitPreview,
+  CommitResult,
   GhProfileStatus,
   GithubRepository,
   GithubAuthPrompt,
   Profile,
   PublishOptions,
   PublishResult,
+  PushPreview,
+  PushResult,
   RepositoryRecord,
 } from "./types";
 
@@ -276,4 +280,66 @@ export async function publishRepository(options: PublishOptions): Promise<Publis
     visibility: options.visibility,
     description: options.description,
   });
+}
+
+export async function previewPush(repositoryId: string, profileId: string): Promise<PushPreview> {
+  if (!inDesktopApp()) {
+    const repository = demoState.repositories.find((item) => item.id === repositoryId);
+    const profile = demoState.profiles.find((item) => item.id === profileId);
+    if (!repository || !profile || !repository.remoteUrl) throw new Error("Repository or profile was not found.");
+    return {
+      repository: structuredClone(repository),
+      profile: structuredClone(profile),
+      branch: repository.branch || "main",
+      remoteUrl: repository.remoteUrl,
+      upstream: repository.branch ? `origin/${repository.branch}` : null,
+      hasUncommittedChanges: false,
+    };
+  }
+  return invoke<PushPreview>("preview_push", { repositoryId, profileId });
+}
+
+export async function pushRepository(repositoryId: string, profileId: string): Promise<PushResult> {
+  if (!inDesktopApp()) {
+    const preview = await previewPush(repositoryId, profileId);
+    return {
+      branch: preview.branch,
+      remoteUrl: preview.remoteUrl,
+      detail: "Everything up-to-date",
+    };
+  }
+  return invoke<PushResult>("push_repository", { repositoryId, profileId });
+}
+
+export async function previewCommit(repositoryId: string, profileId: string): Promise<CommitPreview> {
+  if (!inDesktopApp()) {
+    const repository = demoState.repositories.find((item) => item.id === repositoryId);
+    const profile = demoState.profiles.find((item) => item.id === profileId);
+    if (!repository || !profile) throw new Error("Repository or profile was not found.");
+    return {
+      repository: structuredClone(repository),
+      profile: structuredClone(profile),
+      branch: repository.branch || "main",
+      changes: [
+        { status: "M", path: "src/App.tsx" },
+        { status: "??", path: "notes.md" },
+      ],
+      pushRemoteUrl: repository.remoteUrl || null,
+      pushUnavailableReason: repository.remoteUrl ? null : "This repository does not have an origin remote.",
+    };
+  }
+  return invoke<CommitPreview>("preview_commit", { repositoryId, profileId });
+}
+
+export async function commitRepository(
+  repositoryId: string,
+  profileId: string,
+  message: string,
+): Promise<CommitResult> {
+  if (!inDesktopApp()) {
+    const preview = await previewCommit(repositoryId, profileId);
+    if (!message.trim()) throw new Error("Commit message must contain 1 to 200 characters on one line.");
+    return { branch: preview.branch, commitId: "a1b2c3d", message: message.trim() };
+  }
+  return invoke<CommitResult>("commit_repository", { repositoryId, profileId, message });
 }

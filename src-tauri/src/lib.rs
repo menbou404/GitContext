@@ -23,6 +23,10 @@ pub fn run() {
             commands::publish_repository,
             commands::list_github_repositories,
             commands::clone_repository,
+            commands::preview_push,
+            commands::push_repository,
+            commands::preview_commit,
+            commands::commit_repository,
         ])
         .run(tauri::generate_context!())
         .expect("error while running GitContext");

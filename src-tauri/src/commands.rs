@@ -18,8 +18,9 @@ use crate::{
     git_ops,
     models::{
         normalize_profile, validate_profile, validate_profile_id, AppData, ApplyPreview,
-        BootstrapResult, CloneResult, EnvironmentStatus, GhProfileStatus, GithubRepository,
-        Profile, PublishResult, RepositoryRecord, ToolStatus,
+        BootstrapResult, CloneResult, CommitPreview, CommitResult, EnvironmentStatus,
+        GhProfileStatus, GithubRepository, Profile, PublishResult, PushPreview, PushResult,
+        RepositoryRecord, ToolStatus,
     },
     storage,
 };
@@ -418,6 +419,111 @@ pub fn apply_profile(
     target.last_applied_at = Some(Utc::now().to_rfc3339());
     storage::save(&app, &data)?;
     Ok(data)
+}
+
+#[tauri::command]
+pub fn preview_push(
+    app: AppHandle,
+    gate: State<'_, AppGate>,
+    repository_id: String,
+    profile_id: String,
+) -> Result<PushPreview, String> {
+    let _guard = gate
+        .0
+        .lock()
+        .map_err(|_| "GitContext's state lock is unavailable.")?;
+    let data = storage::load(&app)?;
+    let (repository, profile) = find_assignment(&data, &repository_id, &profile_id)?;
+    if repository.profile_id.as_deref() != Some(profile_id.as_str())
+        || repository.last_applied_at.is_none()
+    {
+        return Err("Apply this Profile to the repository before pushing.".into());
+    }
+    validate_profile(profile)?;
+    git_ops::build_push_preview(repository, profile)
+}
+
+#[tauri::command]
+pub async fn push_repository(
+    app: AppHandle,
+    gate: State<'_, AppGate>,
+    repository_id: String,
+    profile_id: String,
+) -> Result<PushResult, String> {
+    let (repository, profile) = {
+        let _guard = gate
+            .0
+            .lock()
+            .map_err(|_| "GitContext's state lock is unavailable.")?;
+        let data = storage::load(&app)?;
+        let (repository, profile) = find_assignment(&data, &repository_id, &profile_id)?;
+        if repository.profile_id.as_deref() != Some(profile_id.as_str())
+            || repository.last_applied_at.is_none()
+        {
+            return Err("Apply this Profile to the repository before pushing.".into());
+        }
+        validate_profile(profile)?;
+        (repository.clone(), profile.clone())
+    };
+
+    tauri::async_runtime::spawn_blocking(move || {
+        git_ops::push_current_branch(&repository, &profile)
+    })
+    .await
+    .map_err(|error| format!("Git push task failed: {error}"))?
+}
+
+#[tauri::command]
+pub fn preview_commit(
+    app: AppHandle,
+    gate: State<'_, AppGate>,
+    repository_id: String,
+    profile_id: String,
+) -> Result<CommitPreview, String> {
+    let _guard = gate
+        .0
+        .lock()
+        .map_err(|_| "GitContext's state lock is unavailable.")?;
+    let data = storage::load(&app)?;
+    let (repository, profile) = find_assignment(&data, &repository_id, &profile_id)?;
+    if repository.profile_id.as_deref() != Some(profile_id.as_str())
+        || repository.last_applied_at.is_none()
+    {
+        return Err("Apply this Profile to the repository before committing.".into());
+    }
+    validate_profile(profile)?;
+    git_ops::build_commit_preview(repository, profile)
+}
+
+#[tauri::command]
+pub async fn commit_repository(
+    app: AppHandle,
+    gate: State<'_, AppGate>,
+    repository_id: String,
+    profile_id: String,
+    message: String,
+) -> Result<CommitResult, String> {
+    let (repository, profile) = {
+        let _guard = gate
+            .0
+            .lock()
+            .map_err(|_| "GitContext's state lock is unavailable.")?;
+        let data = storage::load(&app)?;
+        let (repository, profile) = find_assignment(&data, &repository_id, &profile_id)?;
+        if repository.profile_id.as_deref() != Some(profile_id.as_str())
+            || repository.last_applied_at.is_none()
+        {
+            return Err("Apply this Profile to the repository before committing.".into());
+        }
+        validate_profile(profile)?;
+        (repository.clone(), profile.clone())
+    };
+
+    tauri::async_runtime::spawn_blocking(move || {
+        git_ops::commit_all_changes(&repository, &profile, &message)
+    })
+    .await
+    .map_err(|error| format!("Git commit task failed: {error}"))?
 }
 
 #[tauri::command]

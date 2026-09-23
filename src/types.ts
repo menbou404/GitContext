@@ -94,6 +94,41 @@ export interface CloneResult {
   repository: RepositoryRecord;
 }
 
+export interface PushPreview {
+  repository: RepositoryRecord;
+  profile: Profile;
+  branch: string;
+  remoteUrl: string;
+  upstream?: string | null;
+  hasUncommittedChanges: boolean;
+}
+
+export interface PushResult {
+  branch: string;
+  remoteUrl: string;
+  detail?: string | null;
+}
+
+export interface WorkingTreeChange {
+  status: string;
+  path: string;
+}
+
+export interface CommitPreview {
+  repository: RepositoryRecord;
+  profile: Profile;
+  branch: string;
+  changes: WorkingTreeChange[];
+  pushRemoteUrl?: string | null;
+  pushUnavailableReason?: string | null;
+}
+
+export interface CommitResult {
+  branch: string;
+  commitId: string;
+  message: string;
+}
+
 export interface ConfigChange {
   key: string;
   currentValue?: string | null;

@@ -5,7 +5,10 @@ use std::{
     process::{Command, Output},
 };
 
-use crate::models::{ApplyPreview, ConfigChange, Profile, RepositoryRecord};
+use crate::models::{
+    ApplyPreview, CommitPreview, CommitResult, ConfigChange, Profile, PushPreview, PushResult,
+    RepositoryRecord, WorkingTreeChange,
+};
 
 pub fn inspect_repository(input: &str) -> Result<RepositoryRecord, String> {
     let root = repository_root(input)?;
@@ -129,6 +132,120 @@ pub fn apply_profile(repository: &RepositoryRecord, profile: &Profile) -> Result
     Ok(())
 }
 
+pub fn build_push_preview(
+    repository: &RepositoryRecord,
+    profile: &Profile,
+) -> Result<PushPreview, String> {
+    let root = repository_root(&repository.path)?;
+    output_text(&run_git(&root, &["rev-parse", "--verify", "HEAD"])?)?;
+    let branch = current_branch(&root, "pushing to GitHub")?;
+    let remote_url = validate_push_settings(&root, profile)?;
+
+    let upstream = git_optional(
+        &root,
+        &[
+            "rev-parse",
+            "--abbrev-ref",
+            "--symbolic-full-name",
+            "@{upstream}",
+        ],
+    );
+    let status = output_text(&run_git(&root, &["status", "--porcelain"])?)?;
+    Ok(PushPreview {
+        repository: repository.clone(),
+        profile: profile.clone(),
+        branch,
+        remote_url,
+        upstream,
+        has_uncommitted_changes: !status.is_empty(),
+    })
+}
+
+pub fn build_commit_preview(
+    repository: &RepositoryRecord,
+    profile: &Profile,
+) -> Result<CommitPreview, String> {
+    let root = repository_root(&repository.path)?;
+    let branch = current_branch(&root, "committing")?;
+    validate_applied_identity(&root, profile)?;
+    let status = output_text(&run_git(
+        &root,
+        &["status", "--porcelain=v1", "--untracked-files=all"],
+    )?)?;
+    let changes = parse_working_tree_changes(&status);
+    let (push_remote_url, push_unavailable_reason) = match validate_push_settings(&root, profile) {
+        Ok(remote_url) => (Some(remote_url), None),
+        Err(error) => (None, Some(error)),
+    };
+
+    Ok(CommitPreview {
+        repository: repository.clone(),
+        profile: profile.clone(),
+        branch,
+        changes,
+        push_remote_url,
+        push_unavailable_reason,
+    })
+}
+
+pub fn commit_all_changes(
+    repository: &RepositoryRecord,
+    profile: &Profile,
+    message: &str,
+) -> Result<CommitResult, String> {
+    let message = validate_commit_message(message)?;
+    let preview = build_commit_preview(repository, profile)?;
+    if preview.changes.is_empty() {
+        return Err("There are no changes to commit.".into());
+    }
+    let root = repository_root(&repository.path)?;
+    output_text(&run_git(&root, &["add", "--all"])?)?;
+    let output = run_git(&root, &["commit", "--message", &message])?;
+    output_text(&output).map_err(|error| {
+        format!("Commit failed. Files may remain staged in the repository. {error}")
+    })?;
+    let commit_id = output_text(&run_git(&root, &["rev-parse", "--short", "HEAD"])?)?;
+
+    Ok(CommitResult {
+        branch: preview.branch,
+        commit_id,
+        message,
+    })
+}
+
+pub fn push_current_branch(
+    repository: &RepositoryRecord,
+    profile: &Profile,
+) -> Result<PushResult, String> {
+    let preview = build_push_preview(repository, profile)?;
+    let root = repository_root(&repository.path)?;
+    let refspec = format!(
+        "refs/heads/{branch}:refs/heads/{branch}",
+        branch = preview.branch
+    );
+    let output = Command::new("git")
+        .current_dir(&root)
+        .args(["push", "--set-upstream", "--", "origin", refspec.as_str()])
+        .output()
+        .map_err(|error| format!("Could not start Git push: {error}"))?;
+    if !output.status.success() {
+        let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if detail.is_empty() {
+            format!("Git push exited with {}.", output.status)
+        } else {
+            detail
+        });
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let detail = [stdout, stderr].into_iter().find(|value| !value.is_empty());
+    Ok(PushResult {
+        branch: preview.branch,
+        remote_url: preview.remote_url,
+        detail,
+    })
+}
+
 pub fn validate_publish_source(repository: &RepositoryRecord) -> Result<(), String> {
     let root = repository_root(&repository.path)?;
     if git_optional(&root, &["config", "--get", "remote.origin.url"]).is_some() {
@@ -150,6 +267,83 @@ pub fn origin_url(repository_path: &str) -> Result<String, String> {
     let root = repository_root(repository_path)?;
     git_optional(&root, &["config", "--get", "remote.origin.url"])
         .ok_or_else(|| "GitHub CLI did not configure the origin remote.".into())
+}
+
+fn validate_github_ssh_remote(value: &str) -> Result<(), String> {
+    let path = value
+        .strip_prefix("git@github.com:")
+        .and_then(|value| value.strip_suffix(".git"))
+        .ok_or_else(|| {
+            "Push requires an SSH origin in the form git@github.com:owner/repository.git."
+                .to_string()
+        })?;
+    let mut parts = path.split('/');
+    let owner = parts.next().unwrap_or_default();
+    let repository = parts.next().unwrap_or_default();
+    if owner.is_empty() || repository.is_empty() || parts.next().is_some() {
+        return Err(
+            "Push requires an SSH origin in the form git@github.com:owner/repository.git.".into(),
+        );
+    }
+    Ok(())
+}
+
+fn current_branch(root: &Path, action: &str) -> Result<String, String> {
+    git_optional(root, &["symbolic-ref", "--quiet", "--short", "HEAD"])
+        .filter(|branch| !branch.is_empty())
+        .ok_or_else(|| format!("Check out a branch before {action}."))
+}
+
+fn validate_applied_identity(root: &Path, profile: &Profile) -> Result<(), String> {
+    let matches_profile =
+        read_local_config(root, "gitcontext.profileId").as_deref() == Some(profile.id.as_str());
+    let matches_name =
+        read_local_config(root, "user.name").as_deref() == Some(profile.git_name.as_str());
+    let matches_email =
+        read_local_config(root, "user.email").as_deref() == Some(profile.git_email.as_str());
+    if !matches_profile || !matches_name || !matches_email {
+        return Err("Reapply this Profile before committing.".into());
+    }
+    Ok(())
+}
+
+fn validate_push_settings(root: &Path, profile: &Profile) -> Result<String, String> {
+    validate_applied_identity(root, profile)
+        .map_err(|_| "Reapply this Profile before pushing to GitHub.".to_string())?;
+    let remote_url = git_optional(root, &["config", "--get", "remote.origin.url"])
+        .ok_or_else(|| "This repository does not have an origin remote.".to_string())?;
+    validate_github_ssh_remote(&remote_url)?;
+    let expected_ssh = desired_config(profile)?
+        .into_iter()
+        .find_map(|(key, value)| (key == "core.sshCommand").then_some(value))
+        .ok_or_else(|| "Choose an SSH private key for this Profile before pushing.".to_string())?;
+    if read_local_config(root, "core.sshCommand").as_deref() != Some(expected_ssh.as_str()) {
+        return Err("Reapply this Profile before pushing to GitHub.".into());
+    }
+    Ok(remote_url)
+}
+
+fn validate_commit_message(value: &str) -> Result<String, String> {
+    let value = value.trim();
+    if value.is_empty() || value.chars().count() > 200 || value.chars().any(char::is_control) {
+        return Err("Commit message must contain 1 to 200 characters on one line.".into());
+    }
+    Ok(value.to_string())
+}
+
+fn parse_working_tree_changes(status: &str) -> Vec<WorkingTreeChange> {
+    status
+        .lines()
+        .filter_map(|line| {
+            if line.len() < 4 {
+                return None;
+            }
+            Some(WorkingTreeChange {
+                status: line[..2].trim().to_string(),
+                path: line[3..].trim().to_string(),
+            })
+        })
+        .collect()
 }
 
 fn repository_root(input: &str) -> Result<PathBuf, String> {
@@ -288,4 +482,101 @@ fn output_text(output: &Output) -> Result<String, String> {
     } else {
         message
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        fs,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    use super::{
+        build_commit_preview, commit_all_changes, parse_working_tree_changes, run_git,
+        validate_commit_message, validate_github_ssh_remote,
+    };
+    use crate::models::{Profile, RepositoryRecord};
+
+    #[test]
+    fn push_accepts_only_standard_github_ssh_remotes() {
+        assert!(validate_github_ssh_remote("git@github.com:owner/repository.git").is_ok());
+        assert!(validate_github_ssh_remote("https://github.com/owner/repository.git").is_err());
+        assert!(validate_github_ssh_remote("git@github.com:owner/group/repository.git").is_err());
+    }
+
+    #[test]
+    fn commit_message_is_single_line_and_bounded() {
+        assert_eq!(
+            validate_commit_message("  Update README  ").unwrap(),
+            "Update README"
+        );
+        assert!(validate_commit_message("").is_err());
+        assert!(validate_commit_message("first\nsecond").is_err());
+        assert!(validate_commit_message(&"a".repeat(201)).is_err());
+    }
+
+    #[test]
+    fn parses_working_tree_status_for_preview() {
+        let changes = parse_working_tree_changes(" M src/App.tsx\n?? notes.txt\n");
+        assert_eq!(changes.len(), 2);
+        assert_eq!(changes[0].status, "M");
+        assert_eq!(changes[0].path, "src/App.tsx");
+        assert_eq!(changes[1].status, "??");
+    }
+
+    #[test]
+    fn commits_all_changes_on_the_current_branch() {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("git-context-commit-test-{suffix}"));
+        fs::create_dir_all(&root).unwrap();
+        run_git(&root, &["init", "--initial-branch=main"]).unwrap();
+        run_git(&root, &["config", "--local", "user.name", "Test User"]).unwrap();
+        run_git(
+            &root,
+            &["config", "--local", "user.email", "test@example.com"],
+        )
+        .unwrap();
+        run_git(
+            &root,
+            &["config", "--local", "gitcontext.profileId", "test-profile"],
+        )
+        .unwrap();
+        fs::write(root.join("README.md"), "test\n").unwrap();
+
+        let repository = RepositoryRecord {
+            id: "test-repository".into(),
+            name: "test".into(),
+            path: root.to_string_lossy().into_owned(),
+            remote_url: None,
+            branch: Some("main".into()),
+            profile_id: Some("test-profile".into()),
+            last_applied_at: Some("now".into()),
+        };
+        let profile = Profile {
+            id: "test-profile".into(),
+            label: "Test".into(),
+            accent: "#123456".into(),
+            git_name: "Test User".into(),
+            git_email: "test@example.com".into(),
+            github_username: None,
+            ssh_key_path: None,
+            gh_config_dir: None,
+        };
+
+        let preview = build_commit_preview(&repository, &profile).unwrap();
+        assert_eq!(preview.branch, "main");
+        assert_eq!(preview.changes.len(), 1);
+        let result = commit_all_changes(&repository, &profile, "Initial commit").unwrap();
+        assert_eq!(result.branch, "main");
+        assert!(!result.commit_id.is_empty());
+        assert!(build_commit_preview(&repository, &profile)
+            .unwrap()
+            .changes
+            .is_empty());
+
+        fs::remove_dir_all(root).unwrap();
+    }
 }

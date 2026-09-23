@@ -20,6 +20,9 @@ GitContextは、複数のGitHub作業Identityをリポジトリ単位で割り�
 - ProfileのGitHub一覧またはSSH URLから安全にcloneし、自動でIdentityを適用
 - repository-localな`.git/config`だけを更新
 - GitHubリポジトリ作成、`origin`設定、初回push
+- 現在ブランチと変更ファイルを確認し、適用済みProfileで全変更をcommit
+- commitのみ、またはcommit後の通常pushを1回の画面から実行
+- 適用済みProfileのSSH鍵で現在ブランチを通常push
 - 日本語・英語UI
 
 ## インストール
@@ -42,6 +45,8 @@ GitContextは認証tokenやSSH秘密鍵の内容を保存しません。GitHub C
 4. GitHubからcloneするか、既存のローカルGitリポジトリを追加
 5. Profileを選び、変更内容を確認して適用
 6. 未公開リポジトリは「GitHubに公開」から作成・push
+7. 現在ブランチと変更ファイルを確認し、「commitのみ」または「commitしてpush」を実行
+8. commit済みの変更だけを送る場合は、送信先とブランチを確認して通常push
 
 ## 安全境界
 
@@ -52,6 +57,8 @@ GitContextは認証tokenやSSH秘密鍵の内容を保存しません。GitHub C
 - Git設定は適用前にキー単位で差分を表示する
 - GitHub公開は既存`origin`や未コミット変更がある場合に拒否する
 - clone URLは`git@github.com:owner/repository.git`形式だけを受け付け、選択ProfileのSSH鍵を明示する
+- commit前に現在ブランチ、Profile、対象ファイルを表示し、コミットメッセージは1行200文字以内に制限する
+- 通常pushはGitHub SSH origin、適用済みProfile、現在ブランチを再検証し、force pushを提供しない
 - 複数Git設定の途中失敗時は元の値へロールバックする
 
 詳細は[docs/MVP_DESIGN.md](docs/MVP_DESIGN.md)を参照してください。脆弱性の報告方法は[SECURITY.md](SECURITY.md)に記載しています。

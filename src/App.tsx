@@ -8,13 +8,17 @@ import {
   chooseRepositoryDirectory,
   chooseSshKey,
   cloneGithubRepository,
+  commitRepository,
   connectGithubProfile,
   inspectGithubProfile,
   listenForGithubAuthPrompt,
   listGithubRepositories,
   openGithubAuthPage,
   previewAssignment,
+  previewCommit,
+  previewPush,
   publishRepository,
+  pushRepository,
   removeRepository,
   saveProfile,
 } from "./backend";
@@ -34,7 +38,7 @@ import {
   TerminalIcon,
   TrashIcon,
 } from "./Icons";
-import type { AppData, ApplyPreview, BootstrapResult, CloneOptions, GhProfileStatus, GithubAuthPrompt, GithubRepository, Profile, PublishOptions, RepositoryRecord, RepositoryVisibility } from "./types";
+import type { AppData, ApplyPreview, BootstrapResult, CloneOptions, CommitPreview, GhProfileStatus, GithubAuthPrompt, GithubRepository, Profile, PublishOptions, PushPreview, RepositoryRecord, RepositoryVisibility } from "./types";
 import { compactPath, initials, profileIsComplete } from "./types";
 import { localizeRuntimeMessage, uiCopy, type Locale } from "./i18n";
 import "./App.css";
@@ -498,6 +502,159 @@ function PublishDialog({
   );
 }
 
+function PushDialog({
+  preview,
+  locale,
+  onClose,
+  onPush,
+}: {
+  preview: PushPreview;
+  locale: Locale;
+  onClose: () => void;
+  onPush: () => Promise<void>;
+}) {
+  const copy = uiCopy[locale];
+  const [pushing, setPushing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const push = async () => {
+    setPushing(true);
+    setError(null);
+    try {
+      await onPush();
+    } catch (cause) {
+      setError(messageFrom(cause, locale));
+      setPushing(false);
+    }
+  };
+
+  return (
+    <div className="modal-layer" role="presentation" onMouseDown={onClose}>
+      <section className="modal push-modal" role="dialog" aria-modal="true" aria-labelledby="push-title" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="modal-header">
+          <div>
+            <p className="eyebrow">GitHub</p>
+            <h2 id="push-title">{copy.pushDialogTitle}</h2>
+          </div>
+          <button className="icon-button" type="button" onClick={onClose} aria-label={copy.close}><CloseIcon /></button>
+        </div>
+        <p className="modal-lead">{copy.pushDialogLead}</p>
+
+        <div className="publish-destination">
+          <ProfileAvatar profile={preview.profile} />
+          <div><span>{copy.pushProfile}</span><strong>{preview.profile.label}{preview.profile.githubUsername ? ` · @${preview.profile.githubUsername}` : ""}</strong></div>
+        </div>
+
+        <dl className="push-details">
+          <div><dt>{copy.pushRemote}</dt><dd title={preview.remoteUrl}>{preview.remoteUrl}</dd></div>
+          <div><dt>{copy.pushBranch}</dt><dd>{preview.branch}</dd></div>
+          <div><dt>{copy.pushUpstream}</dt><dd>{preview.upstream || copy.noUpstream}</dd></div>
+        </dl>
+
+        <div className="push-safety-note">
+          <ShieldIcon />
+          <div><strong>{copy.pushCommittedOnlyTitle}</strong><span>{copy.pushCommittedOnlyLead}</span><small>{copy.normalPushOnly}</small></div>
+        </div>
+        {preview.hasUncommittedChanges && <div className="warning-note"><AlertIcon />{copy.uncommittedChangesPresent}</div>}
+        {error && <div className="inline-error"><AlertIcon />{error}</div>}
+        <div className="modal-actions">
+          <button className="button button--ghost" type="button" onClick={onClose} disabled={pushing}>{copy.cancel}</button>
+          <button className="button button--primary" type="button" onClick={push} disabled={pushing}>{pushing ? copy.pushingBranch : copy.confirmPush}</button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function CommitDialog({
+  preview,
+  locale,
+  onClose,
+  onCommit,
+}: {
+  preview: CommitPreview;
+  locale: Locale;
+  onClose: () => void;
+  onCommit: (message: string, pushAfterCommit: boolean) => Promise<void>;
+}) {
+  const copy = uiCopy[locale];
+  const [message, setMessage] = useState("");
+  const [action, setAction] = useState<"commit" | "push" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const hasChanges = preview.changes.length > 0;
+  const messageIsValid = message.trim().length > 0 && message.trim().length <= 200 && !/[\r\n]/.test(message);
+
+  const commit = async (pushAfterCommit: boolean) => {
+    setAction(pushAfterCommit ? "push" : "commit");
+    setError(null);
+    try {
+      await onCommit(message, pushAfterCommit);
+    } catch (cause) {
+      setError(messageFrom(cause, locale));
+      setAction(null);
+    }
+  };
+
+  return (
+    <div className="modal-layer" role="presentation" onMouseDown={onClose}>
+      <section className="modal commit-modal" role="dialog" aria-modal="true" aria-labelledby="commit-title" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="modal-header">
+          <div>
+            <p className="eyebrow">Git</p>
+            <h2 id="commit-title">{copy.commitDialogTitle}</h2>
+          </div>
+          <button className="icon-button" type="button" onClick={onClose} aria-label={copy.close}><CloseIcon /></button>
+        </div>
+        <p className="modal-lead">{copy.commitDialogLead}</p>
+
+        <div className="publish-destination">
+          <ProfileAvatar profile={preview.profile} />
+          <div><span>{copy.commitProfile}</span><strong>{preview.profile.label} · {preview.profile.gitName} &lt;{preview.profile.gitEmail}&gt;</strong></div>
+        </div>
+
+        <dl className="push-details">
+          <div><dt>{copy.commitBranch}</dt><dd>{preview.branch}</dd></div>
+          <div><dt>{copy.repository}</dt><dd>{preview.repository.name}</dd></div>
+        </dl>
+
+        {hasChanges ? (
+          <>
+            <p className="commit-change-heading">{copy.changesToCommit(preview.changes.length)}</p>
+            <div className="commit-change-list" aria-label={copy.changesToCommit(preview.changes.length)}>
+              {preview.changes.map((change, index) => (
+                <div className="commit-change-row" key={`${change.status}-${change.path}-${index}`}>
+                  <code>{change.status || "M"}</code><span title={change.path}>{change.path}</span>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : <div className="warning-note"><AlertIcon />{copy.noChangesToCommit}</div>}
+
+        <div className="push-safety-note">
+          <ShieldIcon />
+          <div><strong>{copy.allChangesIncludedTitle}</strong><span>{copy.allChangesIncludedLead}</span></div>
+        </div>
+
+        <label className="field commit-message-field">
+          <span>{copy.commitMessage}</span>
+          <input value={message} maxLength={200} placeholder={copy.commitMessagePlaceholder} onChange={(event) => setMessage(event.target.value)} disabled={Boolean(action)} autoFocus />
+          <small>{message.trim().length}/200</small>
+        </label>
+
+        {!preview.pushRemoteUrl && preview.pushUnavailableReason && (
+          <div className="warning-note"><AlertIcon /><div><strong>{copy.pushAfterCommitUnavailable}</strong><br />{localizeRuntimeMessage(preview.pushUnavailableReason, locale)}</div></div>
+        )}
+        {error && <div className="inline-error"><AlertIcon />{error}</div>}
+        <div className="modal-actions commit-actions">
+          <button className="button button--ghost" type="button" onClick={onClose} disabled={Boolean(action)}>{copy.cancel}</button>
+          <button className="button button--ghost" type="button" onClick={() => commit(false)} disabled={!hasChanges || !messageIsValid || Boolean(action)}>{action === "commit" ? copy.committing : copy.commitOnly}</button>
+          <button className="button button--primary" type="button" onClick={() => commit(true)} disabled={!hasChanges || !messageIsValid || !preview.pushRemoteUrl || Boolean(action)}>{action === "push" ? copy.committingAndPushing : copy.commitAndPush}</button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function CloneDialog({
   profiles,
   locale,
@@ -688,6 +845,8 @@ function App({ locale = "en" }: { locale?: Locale }) {
   const [cloneOpen, setCloneOpen] = useState(false);
   const [preview, setPreview] = useState<ApplyPreview | null>(null);
   const [publishTarget, setPublishTarget] = useState<{ repository: RepositoryRecord; profile: Profile } | null>(null);
+  const [pushPreview, setPushPreview] = useState<PushPreview | null>(null);
+  const [commitPreview, setCommitPreview] = useState<CommitPreview | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -792,6 +951,56 @@ function App({ locale = "en" }: { locale?: Locale }) {
     setSelectedRepositoryId(cloned.repository.id);
     setPendingProfileId(options.profileId);
     setNotice(copy.repositoryCloned(cloned.repository.name, profile?.label ?? "Profile"));
+  };
+
+  const reviewPush = async () => {
+    if (!selectedRepository || !assignedProfile) return;
+    setNotice(null);
+    setBusy(true);
+    try {
+      setPushPreview(await previewPush(selectedRepository.id, assignedProfile.id));
+    } catch (error) {
+      setNotice(messageFrom(error, locale));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const pushRepositoryAction = async () => {
+    if (!pushPreview) return;
+    const result = await pushRepository(pushPreview.repository.id, pushPreview.profile.id);
+    setPushPreview(null);
+    setNotice(copy.pushCompleted(result.branch));
+  };
+
+  const reviewCommit = async () => {
+    if (!selectedRepository || !assignedProfile) return;
+    setNotice(null);
+    setBusy(true);
+    try {
+      setCommitPreview(await previewCommit(selectedRepository.id, assignedProfile.id));
+    } catch (error) {
+      setNotice(messageFrom(error, locale));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const commitRepositoryAction = async (message: string, pushAfterCommit: boolean) => {
+    if (!commitPreview) return;
+    const result = await commitRepository(commitPreview.repository.id, commitPreview.profile.id, message);
+    if (pushAfterCommit) {
+      try {
+        await pushRepository(commitPreview.repository.id, commitPreview.profile.id);
+      } catch (error) {
+        throw new Error(copy.commitSucceededPushFailed(result.commitId, messageFrom(error, locale)));
+      }
+      setCommitPreview(null);
+      setNotice(copy.commitAndPushCompleted(result.commitId, result.branch));
+      return;
+    }
+    setCommitPreview(null);
+    setNotice(copy.commitCompleted(result.commitId, result.branch));
   };
 
   const removeSelected = async () => {
@@ -972,9 +1181,16 @@ function App({ locale = "en" }: { locale?: Locale }) {
 
                 <button className="button button--primary button--wide" disabled={!pendingProfile || !profileIsComplete(pendingProfile) || busy} onClick={reviewAssignment}>{copy.reviewAndApply}</button>
                 {selectedRepository.remoteUrl ? (
-                  <div className="remote-ready"><CheckIcon /><div><strong>{copy.githubRemoteReady}</strong><span title={selectedRepository.remoteUrl}>{compactPath(selectedRepository.remoteUrl, 38)}</span></div></div>
+                  <>
+                    <div className="remote-ready"><CheckIcon /><div><strong>{copy.githubRemoteReady}</strong><span title={selectedRepository.remoteUrl}>{compactPath(selectedRepository.remoteUrl, 38)}</span></div></div>
+                    <button className="button button--commit button--wide" disabled={!assignedProfile || !selectedRepository.lastAppliedAt || busy} onClick={reviewCommit}><CheckIcon />{copy.commitButton}</button>
+                    <button className="button button--push button--wide" disabled={!assignedProfile || !selectedRepository.lastAppliedAt || busy} onClick={reviewPush}><BranchIcon />{copy.pushButton}</button>
+                  </>
                 ) : (
-                  <button className="button button--publish button--wide" disabled={!assignedProfile?.githubUsername || !assignedProfile.ghConfigDir || !selectedRepository.lastAppliedAt || busy} onClick={() => assignedProfile && setPublishTarget({ repository: selectedRepository, profile: assignedProfile })}><TerminalIcon />{copy.publishToGithub}</button>
+                  <>
+                    <button className="button button--commit button--wide" disabled={!assignedProfile || !selectedRepository.lastAppliedAt || busy} onClick={reviewCommit}><CheckIcon />{copy.commitButton}</button>
+                    <button className="button button--publish button--wide" disabled={!assignedProfile?.githubUsername || !assignedProfile.ghConfigDir || !selectedRepository.lastAppliedAt || busy} onClick={() => assignedProfile && setPublishTarget({ repository: selectedRepository, profile: assignedProfile })}><TerminalIcon />{copy.publishToGithub}</button>
+                  </>
                 )}
                 <button className="danger-link" onClick={removeSelected}><TrashIcon />{copy.removeFromGitContext}</button>
               </aside>
@@ -987,6 +1203,8 @@ function App({ locale = "en" }: { locale?: Locale }) {
       {cloneOpen && <CloneDialog profiles={data.profiles} locale={locale} onClose={() => setCloneOpen(false)} onClone={cloneRepositoryAction} />}
       {preview && <ApplyDialog preview={preview} locale={locale} onClose={() => setPreview(null)} onApply={applyProfileAction} />}
       {publishTarget && <PublishDialog repository={publishTarget.repository} profile={publishTarget.profile} locale={locale} onClose={() => setPublishTarget(null)} onPublish={publishRepositoryAction} />}
+      {pushPreview && <PushDialog preview={pushPreview} locale={locale} onClose={() => setPushPreview(null)} onPush={pushRepositoryAction} />}
+      {commitPreview && <CommitDialog preview={commitPreview} locale={locale} onClose={() => setCommitPreview(null)} onCommit={commitRepositoryAction} />}
     </div>
   );
 }
