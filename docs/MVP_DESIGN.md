@@ -77,6 +77,17 @@ Profileは次の参照と公開設定をまとめる。
 - commit後のpushに失敗しても作成済みcommitは取り消さず、ローカルに残っていることを明示する
 - detached HEADは拒否し、未作成の初回ブランチは最初のcommitに対応する
 
+### GitHub Pull Request
+
+- GitHubから取得した既定ブランチと、実際の現在ブランチを実行前に表示する
+- 現在が既定ブランチの場合は、Git標準の検証を通った新しい作業ブランチを作成する
+- 作業ブランチ作成、全変更のcommit、SSH push、Pull Request作成を順番に実行する
+- 既存の作業ブランチでは必要な段階だけを実行し、すでに開いているPRがあれば再利用する
+- PRタイトル、本文、Draft指定をGUIで受け取り、`gh pr create`へ固定引数として渡す
+- Profile専用の`GH_CONFIG_DIR`と、Profileに一致するGitHub認証だけを使用する
+- 各段階の成功は取り消さず、失敗後は現在状態を再検出して残りの処理から再開する
+- merge、remoteブランチ削除、ローカルブランチ削除は自動実行しない
+
 ## データモデル
 
 ```text
@@ -133,6 +144,7 @@ GitHub CLIが発行したワンタイムコードはTauri eventで認証中の�
 - GitHub公開前レビュー、リポジトリ作成、origin設定、初回push
 - 適用済みProfileによる既存GitHubリポジトリの現在ブランチpush
 - 現在ブランチと変更一覧を確認する一括commit、およびcommit後の通常push
+- 作業ブランチ作成からcommit、push、Pull Request作成までの再開可能なガイドフロー
 - ブラウザ用interactive previewとフロントエンドテスト
 
 次の候補:

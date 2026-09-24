@@ -6,6 +6,7 @@ import type {
   AppData,
   ApplyPreview,
   BootstrapResult,
+  BranchResult,
   CloneOptions,
   CloneResult,
   CommitPreview,
@@ -16,6 +17,9 @@ import type {
   Profile,
   PublishOptions,
   PublishResult,
+  PullRequestCreateOptions,
+  PullRequestPreview,
+  PullRequestResult,
   PushPreview,
   PushResult,
   RepositoryRecord,
@@ -342,4 +346,64 @@ export async function commitRepository(
     return { branch: preview.branch, commitId: "a1b2c3d", message: message.trim() };
   }
   return invoke<CommitResult>("commit_repository", { repositoryId, profileId, message });
+}
+
+export async function previewPullRequest(
+  repositoryId: string,
+  profileId: string,
+): Promise<PullRequestPreview> {
+  if (!inDesktopApp()) {
+    const repository = demoState.repositories.find((item) => item.id === repositoryId);
+    const profile = demoState.profiles.find((item) => item.id === profileId);
+    if (!repository || !profile || !repository.remoteUrl) throw new Error("Repository or profile was not found.");
+    const currentBranch = repository.branch || "main";
+    const baseBranch = "main";
+    return {
+      repository: structuredClone(repository),
+      profile: structuredClone(profile),
+      currentBranch,
+      baseBranch,
+      remoteUrl: repository.remoteUrl,
+      repositoryNameWithOwner: repository.remoteUrl.replace("git@github.com:", "").replace(/\.git$/, ""),
+      changes: [
+        { status: "M", path: "src/App.tsx" },
+        { status: "??", path: "docs/pr-workflow.md" },
+      ],
+      commitsAhead: currentBranch === baseBranch ? 0 : 1,
+      branchPushed: currentBranch !== baseBranch,
+      requiresNewBranch: currentBranch === baseBranch,
+      existingPullRequest: null,
+    };
+  }
+  return invoke<PullRequestPreview>("preview_pull_request", { repositoryId, profileId });
+}
+
+export async function createBranch(
+  repositoryId: string,
+  profileId: string,
+  branchName: string,
+): Promise<BranchResult> {
+  if (!inDesktopApp()) {
+    demoState.repositories = demoState.repositories.map((repository) =>
+      repository.id === repositoryId ? { ...repository, branch: branchName } : repository,
+    );
+    return { data: structuredClone(demoState), branch: branchName };
+  }
+  return invoke<BranchResult>("create_branch", { repositoryId, profileId, branchName });
+}
+
+export async function createPullRequest(options: PullRequestCreateOptions): Promise<PullRequestResult> {
+  if (!inDesktopApp()) {
+    const repository = demoState.repositories.find((item) => item.id === options.repositoryId);
+    const branch = repository?.branch || "feature/example";
+    return {
+      number: 12,
+      url: "https://github.com/example/example/pull/12",
+      title: options.title,
+      branch,
+      baseBranch: options.baseBranch,
+      existing: false,
+    };
+  }
+  return invoke<PullRequestResult>("create_pull_request", { input: options });
 }

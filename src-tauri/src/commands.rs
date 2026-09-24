@@ -18,9 +18,10 @@ use crate::{
     git_ops,
     models::{
         normalize_profile, validate_profile, validate_profile_id, AppData, ApplyPreview,
-        BootstrapResult, CloneResult, CommitPreview, CommitResult, EnvironmentStatus,
-        GhProfileStatus, GithubRepository, Profile, PublishResult, PushPreview, PushResult,
-        RepositoryRecord, ToolStatus,
+        BootstrapResult, BranchResult, CloneResult, CommitPreview, CommitResult, EnvironmentStatus,
+        GhProfileStatus, GithubRepository, Profile, PublishResult, PullRequestPreview,
+        PullRequestResult, PullRequestSummary, PushPreview, PushResult, RepositoryRecord,
+        ToolStatus,
     },
     storage,
 };
@@ -46,6 +47,17 @@ struct GithubApiRepository {
     private: bool,
     ssh_url: String,
     updated_at: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatePullRequestInput {
+    repository_id: String,
+    profile_id: String,
+    base_branch: String,
+    title: String,
+    body: String,
+    draft: bool,
 }
 
 #[tauri::command]
@@ -527,6 +539,201 @@ pub async fn commit_repository(
 }
 
 #[tauri::command]
+pub async fn preview_pull_request(
+    app: AppHandle,
+    gate: State<'_, AppGate>,
+    repository_id: String,
+    profile_id: String,
+) -> Result<PullRequestPreview, String> {
+    let (repository, profile) = {
+        let _guard = gate
+            .0
+            .lock()
+            .map_err(|_| "GitContext's state lock is unavailable.")?;
+        let data = storage::load(&app)?;
+        let (repository, profile) = find_assignment(&data, &repository_id, &profile_id)?;
+        ensure_applied_assignment(repository, profile, &profile_id, "creating a pull request")?;
+        (repository.clone(), profile.clone())
+    };
+    let directory = connected_gh_directory(&app, &profile)?;
+    let repository_name_with_owner = github_repository_name(&repository)?;
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let base_branch =
+            github_default_branch(&directory, &repository.path, &repository_name_with_owner)?;
+        let source = git_ops::inspect_pull_request_source(&repository, &profile, &base_branch)?;
+        let current_branch = source.current_branch;
+        let requires_new_branch = current_branch == base_branch;
+        let existing_pull_request = if requires_new_branch {
+            None
+        } else {
+            find_existing_pull_request(
+                &directory,
+                &repository.path,
+                &repository_name_with_owner,
+                &current_branch,
+            )?
+        };
+        Ok(PullRequestPreview {
+            repository,
+            profile,
+            current_branch,
+            base_branch,
+            remote_url: source.remote_url,
+            repository_name_with_owner,
+            changes: source.changes,
+            commits_ahead: source.commits_ahead,
+            branch_pushed: source.branch_pushed,
+            requires_new_branch,
+            existing_pull_request,
+        })
+    })
+    .await
+    .map_err(|error| format!("Pull request preview task failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn create_branch(
+    app: AppHandle,
+    gate: State<'_, AppGate>,
+    repository_id: String,
+    profile_id: String,
+    branch_name: String,
+) -> Result<BranchResult, String> {
+    let (repository, profile) = {
+        let _guard = gate
+            .0
+            .lock()
+            .map_err(|_| "GitContext's state lock is unavailable.")?;
+        let data = storage::load(&app)?;
+        let (repository, profile) = find_assignment(&data, &repository_id, &profile_id)?;
+        ensure_applied_assignment(repository, profile, &profile_id, "creating a branch")?;
+        (repository.clone(), profile.clone())
+    };
+    let branch = tauri::async_runtime::spawn_blocking(move || {
+        git_ops::create_working_branch(&repository, &profile, &branch_name)
+    })
+    .await
+    .map_err(|error| format!("Branch creation task failed: {error}"))??;
+    let _guard = gate
+        .0
+        .lock()
+        .map_err(|_| "GitContext's state lock is unavailable.")?;
+    let mut data = storage::load(&app)?;
+    let target = data
+        .repositories
+        .iter_mut()
+        .find(|item| item.id == repository_id)
+        .ok_or_else(|| "Repository was not found.".to_string())?;
+    target.branch = Some(branch.clone());
+    target.remote_url = git_ops::origin_url(&target.path).ok();
+    storage::save(&app, &data)?;
+    Ok(BranchResult { data, branch })
+}
+
+#[tauri::command]
+pub async fn create_pull_request(
+    app: AppHandle,
+    gate: State<'_, AppGate>,
+    input: CreatePullRequestInput,
+) -> Result<PullRequestResult, String> {
+    let title = validate_pull_request_title(&input.title)?;
+    let body = validate_pull_request_body(&input.body)?;
+    let repository_id = input.repository_id;
+    let profile_id = input.profile_id;
+    let base_branch = input.base_branch;
+    let draft = input.draft;
+    let (repository, profile) = {
+        let _guard = gate
+            .0
+            .lock()
+            .map_err(|_| "GitContext's state lock is unavailable.")?;
+        let data = storage::load(&app)?;
+        let (repository, profile) = find_assignment(&data, &repository_id, &profile_id)?;
+        ensure_applied_assignment(repository, profile, &profile_id, "creating a pull request")?;
+        (repository.clone(), profile.clone())
+    };
+    let directory = connected_gh_directory(&app, &profile)?;
+    let repository_name_with_owner = github_repository_name(&repository)?;
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let source = git_ops::inspect_pull_request_source(&repository, &profile, &base_branch)?;
+        let branch = source.current_branch;
+        if branch == base_branch {
+            return Err(
+                "Create or switch to a working branch before creating a pull request.".into(),
+            );
+        }
+        if !source.changes.is_empty() {
+            return Err("Commit all working tree changes before creating a pull request.".into());
+        }
+        if source.commits_ahead == 0 {
+            return Err("The working branch has no commits to propose to the base branch.".into());
+        }
+        if !source.branch_pushed {
+            return Err("Push the current working branch before creating a pull request.".into());
+        }
+        if let Some(existing) = find_existing_pull_request(
+            &directory,
+            &repository.path,
+            &repository_name_with_owner,
+            &branch,
+        )? {
+            return Ok(PullRequestResult {
+                number: existing.number,
+                url: existing.url,
+                title: existing.title,
+                branch,
+                base_branch,
+                existing: true,
+            });
+        }
+
+        let mut command = gh_command(&directory);
+        command.current_dir(&repository.path).args([
+            "pr",
+            "create",
+            "--repo",
+            repository_name_with_owner.as_str(),
+            "--base",
+            base_branch.as_str(),
+            "--head",
+            branch.as_str(),
+            "--title",
+            title.as_str(),
+            "--body",
+            body.as_str(),
+        ]);
+        if draft {
+            command.arg("--draft");
+        }
+        let output = command
+            .output()
+            .map_err(|error| format!("Could not start GitHub CLI: {error}"))?;
+        github_output_text(&output)?;
+        let created = find_existing_pull_request(
+            &directory,
+            &repository.path,
+            &repository_name_with_owner,
+            &branch,
+        )?
+        .ok_or_else(|| {
+            "GitHub created the pull request, but its details could not be read.".to_string()
+        })?;
+        Ok(PullRequestResult {
+            number: created.number,
+            url: created.url,
+            title: created.title,
+            branch,
+            base_branch,
+            existing: false,
+        })
+    })
+    .await
+    .map_err(|error| format!("Pull request creation task failed: {error}"))?
+}
+
+#[tauri::command]
 pub async fn publish_repository(
     app: AppHandle,
     gate: State<'_, AppGate>,
@@ -692,6 +899,142 @@ fn validate_github_description(value: Option<String>) -> Result<Option<String>, 
         }
     }
     Ok(value)
+}
+
+fn validate_pull_request_title(value: &str) -> Result<String, String> {
+    let value = value.trim();
+    if value.is_empty() || value.chars().count() > 256 || value.chars().any(char::is_control) {
+        return Err("Pull request title must contain 1 to 256 characters on one line.".into());
+    }
+    Ok(value.to_string())
+}
+
+fn validate_pull_request_body(value: &str) -> Result<String, String> {
+    if value.chars().count() > 65_536
+        || value
+            .chars()
+            .any(|character| character.is_control() && !matches!(character, '\r' | '\n' | '\t'))
+    {
+        return Err(
+            "Pull request body is too long or contains unsupported control characters.".into(),
+        );
+    }
+    Ok(value.trim().to_string())
+}
+
+fn ensure_applied_assignment(
+    repository: &RepositoryRecord,
+    profile: &Profile,
+    profile_id: &str,
+    action: &str,
+) -> Result<(), String> {
+    if repository.profile_id.as_deref() != Some(profile_id) || repository.last_applied_at.is_none()
+    {
+        return Err(format!(
+            "Apply this Profile to the repository before {action}."
+        ));
+    }
+    validate_profile(profile)
+}
+
+fn connected_gh_directory(app: &AppHandle, profile: &Profile) -> Result<PathBuf, String> {
+    let directory = resolve_gh_config_dir(app, &profile.id, profile.gh_config_dir.as_deref())?;
+    let status = inspect_gh_directory(&directory);
+    let username = status
+        .username
+        .filter(|_| status.authenticated)
+        .ok_or_else(|| {
+            status.detail.unwrap_or_else(|| {
+                "Connect this Profile to GitHub before creating a pull request.".into()
+            })
+        })?;
+    if let Some(expected) = profile.github_username.as_deref() {
+        if !expected.eq_ignore_ascii_case(&username) {
+            return Err(format!(
+                "The Profile expects @{expected}, but GitHub CLI is authenticated as @{username}."
+            ));
+        }
+    }
+    Ok(directory)
+}
+
+fn github_repository_name(repository: &RepositoryRecord) -> Result<String, String> {
+    let remote_url = git_ops::origin_url(&repository.path)?;
+    let (normalized, _) = validate_github_ssh_url(&remote_url)?;
+    normalized
+        .strip_prefix("git@github.com:")
+        .and_then(|value| value.strip_suffix(".git"))
+        .map(str::to_string)
+        .ok_or_else(|| "The origin remote is not a supported GitHub SSH URL.".into())
+}
+
+fn github_default_branch(
+    directory: &Path,
+    repository_path: &str,
+    repository_name_with_owner: &str,
+) -> Result<String, String> {
+    let mut command = gh_command(directory);
+    let output = command
+        .current_dir(repository_path)
+        .args([
+            "repo",
+            "view",
+            repository_name_with_owner,
+            "--json",
+            "defaultBranchRef",
+            "--jq",
+            ".defaultBranchRef.name",
+        ])
+        .output()
+        .map_err(|error| format!("Could not start GitHub CLI: {error}"))?;
+    let branch = github_output_text(&output)?;
+    if branch.is_empty() {
+        return Err("GitHub did not return a default branch for this repository.".into());
+    }
+    Ok(branch)
+}
+
+fn find_existing_pull_request(
+    directory: &Path,
+    repository_path: &str,
+    repository_name_with_owner: &str,
+    branch: &str,
+) -> Result<Option<PullRequestSummary>, String> {
+    let mut command = gh_command(directory);
+    let output = command
+        .current_dir(repository_path)
+        .args([
+            "pr",
+            "list",
+            "--repo",
+            repository_name_with_owner,
+            "--head",
+            branch,
+            "--state",
+            "open",
+            "--limit",
+            "1",
+            "--json",
+            "number,url,title",
+        ])
+        .output()
+        .map_err(|error| format!("Could not start GitHub CLI: {error}"))?;
+    let text = github_output_text(&output)?;
+    let mut pull_requests: Vec<PullRequestSummary> = serde_json::from_str(&text)
+        .map_err(|error| format!("GitHub CLI returned invalid pull request data: {error}"))?;
+    Ok(pull_requests.pop())
+}
+
+fn github_output_text(output: &std::process::Output) -> Result<String, String> {
+    if output.status.success() {
+        return Ok(String::from_utf8_lossy(&output.stdout).trim().to_string());
+    }
+    let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    Err(if detail.is_empty() {
+        format!("GitHub CLI exited with {}.", output.status)
+    } else {
+        detail
+    })
 }
 
 fn find_assignment<'a>(
@@ -928,6 +1271,7 @@ fn inspect_gh_directory(directory: &Path) -> GhProfileStatus {
 mod tests {
     use super::{
         extract_github_device_code, validate_github_repository_name, validate_github_ssh_url,
+        validate_pull_request_body, validate_pull_request_title,
     };
 
     #[test]
@@ -963,5 +1307,19 @@ mod tests {
         );
         assert!(validate_github_ssh_url("https://github.com/owner/repo.git").is_err());
         assert!(validate_github_ssh_url("git@github.com:owner/group/repo.git").is_err());
+    }
+
+    #[test]
+    fn validates_pull_request_text() {
+        assert_eq!(
+            validate_pull_request_title(" Add PR workflow ").unwrap(),
+            "Add PR workflow"
+        );
+        assert!(validate_pull_request_title("first\nsecond").is_err());
+        assert_eq!(
+            validate_pull_request_body(" Summary\n\n- Tested\n").unwrap(),
+            "Summary\n\n- Tested"
+        );
+        assert!(validate_pull_request_body("invalid\0body").is_err());
     }
 }

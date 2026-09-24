@@ -173,6 +173,48 @@ pub struct CommitResult {
     pub message: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchResult {
+    pub data: AppData,
+    pub branch: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestSummary {
+    pub number: u64,
+    pub url: String,
+    pub title: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestPreview {
+    pub repository: RepositoryRecord,
+    pub profile: Profile,
+    pub current_branch: String,
+    pub base_branch: String,
+    pub remote_url: String,
+    pub repository_name_with_owner: String,
+    pub changes: Vec<WorkingTreeChange>,
+    pub commits_ahead: u64,
+    pub branch_pushed: bool,
+    pub requires_new_branch: bool,
+    pub existing_pull_request: Option<PullRequestSummary>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestResult {
+    pub number: u64,
+    pub url: String,
+    pub title: String,
+    pub branch: String,
+    pub base_branch: String,
+    pub existing: bool,
+}
+
 pub fn clean_optional(value: Option<String>) -> Option<String> {
     value.and_then(|item| {
         let trimmed = item.trim().to_string();
