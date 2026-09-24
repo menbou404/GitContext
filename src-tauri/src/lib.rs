@@ -27,6 +27,9 @@ pub fn run() {
             commands::push_repository,
             commands::preview_commit,
             commands::commit_repository,
+            commands::preview_pull_request,
+            commands::create_branch,
+            commands::create_pull_request,
         ])
         .run(tauri::generate_context!())
         .expect("error while running GitContext");

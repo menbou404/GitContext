@@ -10,12 +10,15 @@ import {
   cloneGithubRepository,
   commitRepository,
   connectGithubProfile,
+  createBranch,
+  createPullRequest,
   inspectGithubProfile,
   listenForGithubAuthPrompt,
   listGithubRepositories,
   openGithubAuthPage,
   previewAssignment,
   previewCommit,
+  previewPullRequest,
   previewPush,
   publishRepository,
   pushRepository,
@@ -38,7 +41,7 @@ import {
   TerminalIcon,
   TrashIcon,
 } from "./Icons";
-import type { AppData, ApplyPreview, BootstrapResult, CloneOptions, CommitPreview, GhProfileStatus, GithubAuthPrompt, GithubRepository, Profile, PublishOptions, PushPreview, RepositoryRecord, RepositoryVisibility } from "./types";
+import type { AppData, ApplyPreview, BootstrapResult, CloneOptions, CommitPreview, GhProfileStatus, GithubAuthPrompt, GithubRepository, Profile, PublishOptions, PullRequestPreview, PullRequestResult, PushPreview, RepositoryRecord, RepositoryVisibility } from "./types";
 import { compactPath, initials, profileIsComplete } from "./types";
 import { localizeRuntimeMessage, uiCopy, type Locale } from "./i18n";
 import "./App.css";
@@ -655,6 +658,164 @@ function CommitDialog({
   );
 }
 
+type PullRequestStage = "branch" | "commit" | "push" | "pr";
+
+function PullRequestDialog({
+  preview,
+  locale,
+  onClose,
+  onRefresh,
+  onCreate,
+}: {
+  preview: PullRequestPreview;
+  locale: Locale;
+  onClose: () => void;
+  onRefresh: () => Promise<void>;
+  onCreate: (
+    input: { branchName: string; commitMessage: string; title: string; body: string; draft: boolean },
+    onProgress: (stage: PullRequestStage) => void,
+  ) => Promise<PullRequestResult>;
+}) {
+  const copy = uiCopy[locale];
+  const [branchName, setBranchName] = useState("");
+  const [commitMessage, setCommitMessage] = useState("");
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+  const [draft, setDraft] = useState(false);
+  const [stage, setStage] = useState<PullRequestStage | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<PullRequestResult | null>(null);
+  const [copied, setCopied] = useState(false);
+  const hasChanges = preview.changes.length > 0;
+  const hasProposal = hasChanges || preview.commitsAhead > 0;
+  const branchIsValid = !preview.requiresNewBranch || (branchName.trim().length > 0 && branchName.trim().length <= 200);
+  const commitMessageIsValid = !hasChanges || (commitMessage.trim().length > 0 && commitMessage.trim().length <= 200 && !/[\r\n]/.test(commitMessage));
+  const titleIsValid = title.trim().length > 0 && title.trim().length <= 256 && !/[\r\n]/.test(title);
+  const workingBranch = preview.requiresNewBranch ? branchName.trim() || "—" : preview.currentBranch;
+  const running = stage !== null;
+  const stages: Array<{ id: PullRequestStage; label: string; shown: boolean }> = [
+    { id: "branch", label: copy.prStepBranch, shown: preview.requiresNewBranch },
+    { id: "commit", label: copy.prStepCommit, shown: hasChanges },
+    { id: "push", label: copy.prStepPush, shown: preview.requiresNewBranch || hasChanges || !preview.branchPushed },
+    { id: "pr", label: copy.prStepCreate, shown: true },
+  ];
+  const visibleStages = stages.filter((item) => item.shown);
+
+  const submit = async () => {
+    setError(null);
+    setResult(null);
+    try {
+      const created = await onCreate({ branchName, commitMessage, title, body, draft }, setStage);
+      setResult(created);
+      setStage(null);
+    } catch (cause) {
+      setError(messageFrom(cause, locale));
+      setStage(null);
+      await onRefresh().catch(() => undefined);
+    }
+  };
+
+  const copyUrl = async () => {
+    if (!result) return;
+    await navigator.clipboard.writeText(result.url);
+    setCopied(true);
+  };
+
+  return (
+    <div className="modal-layer" role="presentation" onMouseDown={running ? undefined : onClose}>
+      <section className="modal pull-request-modal" role="dialog" aria-modal="true" aria-labelledby="pull-request-title" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="modal-header">
+          <div>
+            <p className="eyebrow">GitHub</p>
+            <h2 id="pull-request-title">{copy.pullRequestDialogTitle}</h2>
+          </div>
+          <button className="icon-button" type="button" onClick={onClose} disabled={running} aria-label={copy.close}><CloseIcon /></button>
+        </div>
+
+        {result ? (
+          <div className="pull-request-result">
+            <span className="result-icon"><CheckIcon /></span>
+            <p className="eyebrow">{copy.pullRequestReady}</p>
+            <h3>{result.existing ? copy.pullRequestAlreadyExists(result.number) : copy.pullRequestCreated(result.number)}</h3>
+            <p>{result.branch} → {result.baseBranch}</p>
+            <code>{result.url}</code>
+            <div className="modal-actions">
+              <button className="button button--ghost" type="button" onClick={copyUrl}>{copied ? copy.copied : copy.copyPullRequestUrl}</button>
+              <button className="button button--primary" type="button" onClick={onClose}>{copy.close}</button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <p className="modal-lead">{copy.pullRequestDialogLead}</p>
+            <div className="publish-destination">
+              <ProfileAvatar profile={preview.profile} />
+              <div><span>{copy.pullRequestRepository}</span><strong>{preview.repositoryNameWithOwner} · {preview.profile.label}</strong></div>
+            </div>
+
+            <dl className="push-details pull-request-route">
+              <div><dt>{copy.pullRequestBase}</dt><dd>{preview.baseBranch}</dd></div>
+              <div><dt>{copy.pullRequestHead}</dt><dd>{workingBranch}</dd></div>
+            </dl>
+
+            {preview.requiresNewBranch ? (
+              <>
+                <div className="privacy-note"><BranchIcon /><span>{copy.branchWillBeCreated(preview.baseBranch)}</span></div>
+                <label className="field pull-request-field">
+                  <span>{copy.newBranchName}</span>
+                  <input value={branchName} maxLength={200} placeholder={copy.branchNamePlaceholder} onChange={(event) => setBranchName(event.target.value)} disabled={running} autoFocus />
+                </label>
+              </>
+            ) : <div className="privacy-note"><BranchIcon /><span>{copy.existingWorkingBranch} {copy.commitsAhead(preview.commitsAhead)}</span></div>}
+
+            {hasChanges && (
+              <>
+                <p className="commit-change-heading">{copy.changesToCommit(preview.changes.length)}</p>
+                <div className="commit-change-list" aria-label={copy.changesToCommit(preview.changes.length)}>
+                  {preview.changes.map((change, index) => (
+                    <div className="commit-change-row" key={`${change.status}-${change.path}-${index}`}>
+                      <code>{change.status || "M"}</code><span title={change.path}>{change.path}</span>
+                    </div>
+                  ))}
+                </div>
+                <label className="field pull-request-field">
+                  <span>{copy.commitMessage}</span>
+                  <input value={commitMessage} maxLength={200} placeholder={copy.commitMessagePlaceholder} onChange={(event) => setCommitMessage(event.target.value)} disabled={running} />
+                </label>
+              </>
+            )}
+
+            {!hasProposal && <div className="warning-note"><AlertIcon />{copy.noPullRequestChanges}</div>}
+            {preview.existingPullRequest && <div className="warning-note"><AlertIcon />{copy.existingPullRequestFound(preview.existingPullRequest.number)}</div>}
+
+            <div className="pull-request-form-grid">
+              <label className="field">
+                <span>{copy.pullRequestTitle}</span>
+                <input value={title} maxLength={256} placeholder={copy.pullRequestTitlePlaceholder} onChange={(event) => setTitle(event.target.value)} disabled={running} />
+              </label>
+              <label className="field">
+                <span>{copy.pullRequestBody}</span>
+                <textarea value={body} maxLength={65536} rows={4} placeholder={copy.pullRequestBodyPlaceholder} onChange={(event) => setBody(event.target.value)} disabled={running} />
+              </label>
+              <label className="draft-option"><input type="checkbox" checked={draft} onChange={(event) => setDraft(event.target.checked)} disabled={running} />{copy.createAsDraft}</label>
+            </div>
+
+            <ol className="pull-request-steps">
+              {visibleStages.map((item) => <li className={stage === item.id ? "active" : ""} key={item.id}>{item.label}</li>)}
+            </ol>
+            {error && <div className="inline-error"><AlertIcon />{error}</div>}
+            <div className="modal-actions">
+              <button className="button button--ghost" type="button" onClick={onClose} disabled={running}>{copy.cancel}</button>
+              <button className="button button--primary" type="button" onClick={submit} disabled={!hasProposal || !branchIsValid || !commitMessageIsValid || !titleIsValid || running}>
+                {running ? copy.creatingPullRequest : preview.requiresNewBranch ? copy.createPullRequestAction : hasChanges ? copy.continuePullRequestAction : copy.openPullRequestAction}
+              </button>
+            </div>
+          </>
+        )}
+      </section>
+    </div>
+  );
+}
+
 function CloneDialog({
   profiles,
   locale,
@@ -847,6 +1008,7 @@ function App({ locale = "en" }: { locale?: Locale }) {
   const [publishTarget, setPublishTarget] = useState<{ repository: RepositoryRecord; profile: Profile } | null>(null);
   const [pushPreview, setPushPreview] = useState<PushPreview | null>(null);
   const [commitPreview, setCommitPreview] = useState<CommitPreview | null>(null);
+  const [pullRequestPreview, setPullRequestPreview] = useState<PullRequestPreview | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -1001,6 +1163,57 @@ function App({ locale = "en" }: { locale?: Locale }) {
     }
     setCommitPreview(null);
     setNotice(copy.commitCompleted(result.commitId, result.branch));
+  };
+
+  const reviewPullRequest = async () => {
+    if (!selectedRepository || !assignedProfile) return;
+    setNotice(null);
+    setBusy(true);
+    try {
+      setPullRequestPreview(await previewPullRequest(selectedRepository.id, assignedProfile.id));
+    } catch (error) {
+      setNotice(messageFrom(error, locale));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const refreshPullRequest = async () => {
+    if (!pullRequestPreview) return;
+    setPullRequestPreview(await previewPullRequest(pullRequestPreview.repository.id, pullRequestPreview.profile.id));
+  };
+
+  const createPullRequestAction = async (
+    input: { branchName: string; commitMessage: string; title: string; body: string; draft: boolean },
+    onProgress: (stage: PullRequestStage) => void,
+  ) => {
+    if (!pullRequestPreview) throw new Error(copy.somethingWentWrong);
+    const repositoryId = pullRequestPreview.repository.id;
+    const profileId = pullRequestPreview.profile.id;
+    if (pullRequestPreview.requiresNewBranch) {
+      onProgress("branch");
+      const created = await createBranch(repositoryId, profileId, input.branchName);
+      updateData(created.data);
+    }
+    if (pullRequestPreview.changes.length > 0) {
+      onProgress("commit");
+      await commitRepository(repositoryId, profileId, input.commitMessage);
+    }
+    if (pullRequestPreview.requiresNewBranch || pullRequestPreview.changes.length > 0 || !pullRequestPreview.branchPushed) {
+      onProgress("push");
+      await pushRepository(repositoryId, profileId);
+    }
+    onProgress("pr");
+    const created = await createPullRequest({
+      repositoryId,
+      profileId,
+      baseBranch: pullRequestPreview.baseBranch,
+      title: input.title,
+      body: input.body,
+      draft: input.draft,
+    });
+    setNotice(created.existing ? copy.pullRequestAlreadyExists(created.number) : copy.pullRequestCreated(created.number));
+    return created;
   };
 
   const removeSelected = async () => {
@@ -1184,6 +1397,7 @@ function App({ locale = "en" }: { locale?: Locale }) {
                   <>
                     <div className="remote-ready"><CheckIcon /><div><strong>{copy.githubRemoteReady}</strong><span title={selectedRepository.remoteUrl}>{compactPath(selectedRepository.remoteUrl, 38)}</span></div></div>
                     <button className="button button--commit button--wide" disabled={!assignedProfile || !selectedRepository.lastAppliedAt || busy} onClick={reviewCommit}><CheckIcon />{copy.commitButton}</button>
+                    <button className="button button--pr button--wide" disabled={!assignedProfile?.githubUsername || !assignedProfile.ghConfigDir || !selectedRepository.lastAppliedAt || busy} onClick={reviewPullRequest}><BranchIcon />{copy.pullRequestButton}</button>
                     <button className="button button--push button--wide" disabled={!assignedProfile || !selectedRepository.lastAppliedAt || busy} onClick={reviewPush}><BranchIcon />{copy.pushButton}</button>
                   </>
                 ) : (
@@ -1205,6 +1419,7 @@ function App({ locale = "en" }: { locale?: Locale }) {
       {publishTarget && <PublishDialog repository={publishTarget.repository} profile={publishTarget.profile} locale={locale} onClose={() => setPublishTarget(null)} onPublish={publishRepositoryAction} />}
       {pushPreview && <PushDialog preview={pushPreview} locale={locale} onClose={() => setPushPreview(null)} onPush={pushRepositoryAction} />}
       {commitPreview && <CommitDialog preview={commitPreview} locale={locale} onClose={() => setCommitPreview(null)} onCommit={commitRepositoryAction} />}
+      {pullRequestPreview && <PullRequestDialog preview={pullRequestPreview} locale={locale} onClose={() => setPullRequestPreview(null)} onRefresh={refreshPullRequest} onCreate={createPullRequestAction} />}
     </div>
   );
 }

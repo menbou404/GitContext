@@ -10,6 +10,14 @@ use crate::models::{
     RepositoryRecord, WorkingTreeChange,
 };
 
+pub struct PullRequestSourceState {
+    pub current_branch: String,
+    pub remote_url: String,
+    pub changes: Vec<WorkingTreeChange>,
+    pub commits_ahead: u64,
+    pub branch_pushed: bool,
+}
+
 pub fn inspect_repository(input: &str) -> Result<RepositoryRecord, String> {
     let root = repository_root(input)?;
     let name = root
@@ -168,11 +176,7 @@ pub fn build_commit_preview(
     let root = repository_root(&repository.path)?;
     let branch = current_branch(&root, "committing")?;
     validate_applied_identity(&root, profile)?;
-    let status = output_text(&run_git(
-        &root,
-        &["status", "--porcelain=v1", "--untracked-files=all"],
-    )?)?;
-    let changes = parse_working_tree_changes(&status);
+    let changes = working_tree_changes(&root)?;
     let (push_remote_url, push_unavailable_reason) = match validate_push_settings(&root, profile) {
         Ok(remote_url) => (Some(remote_url), None),
         Err(error) => (None, Some(error)),
@@ -186,6 +190,84 @@ pub fn build_commit_preview(
         push_remote_url,
         push_unavailable_reason,
     })
+}
+
+pub fn inspect_pull_request_source(
+    repository: &RepositoryRecord,
+    profile: &Profile,
+    base_branch: &str,
+) -> Result<PullRequestSourceState, String> {
+    let root = repository_root(&repository.path)?;
+    validate_branch_name(&root, base_branch)?;
+    let current = current_branch(&root, "creating a pull request")?;
+    let remote_url = validate_push_settings(&root, profile)?;
+    let changes = working_tree_changes(&root)?;
+    let base_ref = format!("refs/remotes/origin/{base_branch}");
+    let fetch_ref = format!("refs/heads/{base_branch}:{base_ref}");
+    output_text(&run_git(
+        &root,
+        &["fetch", "--no-tags", "origin", &fetch_ref],
+    )?)
+    .map_err(|error| format!("Could not refresh origin/{base_branch}: {error}"))?;
+    let range = format!("origin/{base_branch}..HEAD");
+    let commits_ahead = output_text(&run_git(&root, &["rev-list", "--count", &range])?)?
+        .parse::<u64>()
+        .map_err(|_| "Git returned an invalid commit count.".to_string())?;
+    let remote_branch = format!("refs/remotes/origin/{current}");
+    let local_head = git_optional(&root, &["rev-parse", "HEAD"]);
+    let remote_head = git_optional(&root, &["rev-parse", &remote_branch]);
+    let branch_pushed = local_head.is_some() && local_head == remote_head;
+    Ok(PullRequestSourceState {
+        current_branch: current,
+        remote_url,
+        changes,
+        commits_ahead,
+        branch_pushed,
+    })
+}
+
+pub fn create_working_branch(
+    repository: &RepositoryRecord,
+    profile: &Profile,
+    branch: &str,
+) -> Result<String, String> {
+    let root = repository_root(&repository.path)?;
+    validate_applied_identity(&root, profile)?;
+    let branch = validate_branch_name(&root, branch)?;
+    let current = current_branch(&root, "creating a branch")?;
+    if current == branch {
+        return Err("The requested branch is already checked out.".into());
+    }
+    for reference in [
+        format!("refs/heads/{branch}"),
+        format!("refs/remotes/origin/{branch}"),
+    ] {
+        let output = run_git(&root, &["show-ref", "--verify", "--quiet", &reference])?;
+        if output.status.success() {
+            return Err("A local or known remote branch with this name already exists.".into());
+        }
+    }
+    if git_optional(&root, &["config", "--get", "remote.origin.url"]).is_some() {
+        let remote_reference = format!("refs/heads/{branch}");
+        let output = run_git(
+            &root,
+            &[
+                "ls-remote",
+                "--exit-code",
+                "--heads",
+                "origin",
+                &remote_reference,
+            ],
+        )?;
+        if output.status.success() {
+            return Err("A remote branch with this name already exists on GitHub.".into());
+        }
+        if output.status.code() != Some(2) {
+            output_text(&output)?;
+        }
+    }
+    output_text(&run_git(&root, &["switch", "--create", &branch])?)?;
+    Ok(branch)
 }
 
 pub fn commit_all_changes(
@@ -270,6 +352,10 @@ pub fn origin_url(repository_path: &str) -> Result<String, String> {
 }
 
 fn validate_github_ssh_remote(value: &str) -> Result<(), String> {
+    parse_github_ssh_remote(value).map(|_| ())
+}
+
+fn parse_github_ssh_remote(value: &str) -> Result<(String, String), String> {
     let path = value
         .strip_prefix("git@github.com:")
         .and_then(|value| value.strip_suffix(".git"))
@@ -285,7 +371,7 @@ fn validate_github_ssh_remote(value: &str) -> Result<(), String> {
             "Push requires an SSH origin in the form git@github.com:owner/repository.git.".into(),
         );
     }
-    Ok(())
+    Ok((owner.to_string(), repository.to_string()))
 }
 
 fn current_branch(root: &Path, action: &str) -> Result<String, String> {
@@ -329,6 +415,26 @@ fn validate_commit_message(value: &str) -> Result<String, String> {
         return Err("Commit message must contain 1 to 200 characters on one line.".into());
     }
     Ok(value.to_string())
+}
+
+fn validate_branch_name(root: &Path, value: &str) -> Result<String, String> {
+    let value = value.trim();
+    if value.is_empty() || value.chars().count() > 200 {
+        return Err("Branch name must contain 1 to 200 characters.".into());
+    }
+    let output = run_git(root, &["check-ref-format", "--branch", value])?;
+    if !output.status.success() {
+        return Err("Branch name is not valid for Git.".into());
+    }
+    Ok(value.to_string())
+}
+
+fn working_tree_changes(root: &Path) -> Result<Vec<WorkingTreeChange>, String> {
+    let status = output_text(&run_git(
+        root,
+        &["status", "--porcelain=v1", "--untracked-files=all"],
+    )?)?;
+    Ok(parse_working_tree_changes(&status))
 }
 
 fn parse_working_tree_changes(status: &str) -> Vec<WorkingTreeChange> {
@@ -492,8 +598,8 @@ mod tests {
     };
 
     use super::{
-        build_commit_preview, commit_all_changes, parse_working_tree_changes, run_git,
-        validate_commit_message, validate_github_ssh_remote,
+        build_commit_preview, commit_all_changes, create_working_branch,
+        parse_working_tree_changes, run_git, validate_commit_message, validate_github_ssh_remote,
     };
     use crate::models::{Profile, RepositoryRecord};
 
@@ -576,6 +682,11 @@ mod tests {
             .unwrap()
             .changes
             .is_empty());
+        assert_eq!(
+            create_working_branch(&repository, &profile, "feature/test").unwrap(),
+            "feature/test"
+        );
+        assert!(create_working_branch(&repository, &profile, "bad branch").is_err());
 
         fs::remove_dir_all(root).unwrap();
     }

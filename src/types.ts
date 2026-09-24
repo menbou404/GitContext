@@ -129,6 +129,49 @@ export interface CommitResult {
   message: string;
 }
 
+export interface BranchResult {
+  data: AppData;
+  branch: string;
+}
+
+export interface PullRequestSummary {
+  number: number;
+  url: string;
+  title: string;
+}
+
+export interface PullRequestPreview {
+  repository: RepositoryRecord;
+  profile: Profile;
+  currentBranch: string;
+  baseBranch: string;
+  remoteUrl: string;
+  repositoryNameWithOwner: string;
+  changes: WorkingTreeChange[];
+  commitsAhead: number;
+  branchPushed: boolean;
+  requiresNewBranch: boolean;
+  existingPullRequest?: PullRequestSummary | null;
+}
+
+export interface PullRequestResult {
+  number: number;
+  url: string;
+  title: string;
+  branch: string;
+  baseBranch: string;
+  existing: boolean;
+}
+
+export interface PullRequestCreateOptions {
+  repositoryId: string;
+  profileId: string;
+  baseBranch: string;
+  title: string;
+  body: string;
+  draft: boolean;
+}
+
 export interface ConfigChange {
   key: string;
   currentValue?: string | null;

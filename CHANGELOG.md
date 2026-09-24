@@ -9,6 +9,7 @@
 - ProfileのGitHub一覧またはSSH URLからcloneし、同じIdentityを自動適用するフロー
 - 適用済みProfileのSSH鍵で現在ブランチを安全に通常pushするフロー
 - 現在ブランチと変更ファイルを確認し、commitのみ／commitしてpushを選べるフロー
+- 作業ブランチ作成、commit、push、Pull Request作成を安全に案内する再開可能なフロー
 
 ### Planned
 
