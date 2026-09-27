@@ -149,6 +149,21 @@ pub struct PushResult {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SyncPreview {
+    pub repository: RepositoryRecord,
+    pub profile: Profile,
+    pub branch: String,
+    pub remote_url: String,
+    pub upstream: Option<String>,
+    pub remote_branch: Option<String>,
+    pub changes: Vec<WorkingTreeChange>,
+    pub ahead: u64,
+    pub behind: u64,
+    pub fetched_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkingTreeChange {
     pub status: String,
     pub path: String,

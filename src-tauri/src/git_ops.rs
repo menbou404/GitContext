@@ -7,7 +7,7 @@ use std::{
 
 use crate::models::{
     ApplyPreview, CommitPreview, CommitResult, ConfigChange, Profile, PushPreview, PushResult,
-    RepositoryRecord, WorkingTreeChange,
+    RepositoryRecord, SyncPreview, WorkingTreeChange,
 };
 
 pub struct PullRequestSourceState {
@@ -328,6 +328,130 @@ pub fn push_current_branch(
     })
 }
 
+pub fn refresh_sync_preview(
+    repository: &RepositoryRecord,
+    profile: &Profile,
+) -> Result<SyncPreview, String> {
+    let root = repository_root(&repository.path)?;
+    output_text(&run_git(&root, &["rev-parse", "--verify", "HEAD"])?)?;
+    let branch = current_branch(&root, "syncing with GitHub")?;
+    let remote_url = validate_push_settings(&root, profile)
+        .map_err(|error| error.replace("pushing to GitHub", "syncing with GitHub"))?;
+
+    output_text(&run_git(
+        &root,
+        &["fetch", "--prune", "--no-tags", "origin"],
+    )?)
+    .map_err(|error| format!("Could not fetch from origin: {error}"))?;
+
+    build_sync_preview(repository, profile, &root, branch, remote_url)
+}
+
+pub fn pull_current_branch(
+    repository: &RepositoryRecord,
+    profile: &Profile,
+) -> Result<SyncPreview, String> {
+    let preview = refresh_sync_preview(repository, profile)?;
+    if !preview.changes.is_empty() {
+        return Err("Commit or discard local changes before pulling from GitHub.".into());
+    }
+    let remote_branch = preview
+        .remote_branch
+        .as_deref()
+        .ok_or_else(|| "The current branch does not exist on origin yet.".to_string())?;
+    if preview.ahead > 0 && preview.behind > 0 {
+        return Err(
+            "The local and remote branches have diverged. Resolve them manually before pulling."
+                .into(),
+        );
+    }
+    if preview.behind == 0 {
+        return Ok(preview);
+    }
+
+    let root = repository_root(&repository.path)?;
+    if current_branch(&root, "syncing with GitHub")? != preview.branch
+        || !working_tree_changes(&root)?.is_empty()
+    {
+        return Err(
+            "The branch or working tree changed while preparing the pull. Refresh and try again."
+                .into(),
+        );
+    }
+    output_text(&run_git(&root, &["merge", "--ff-only", remote_branch])?)
+        .map_err(|error| format!("Fast-forward pull failed: {error}"))?;
+    let branch = current_branch(&root, "syncing with GitHub")?;
+    let remote_url = validate_push_settings(&root, profile)?;
+    build_sync_preview(repository, profile, &root, branch, remote_url)
+}
+
+fn build_sync_preview(
+    repository: &RepositoryRecord,
+    profile: &Profile,
+    root: &Path,
+    branch: String,
+    remote_url: String,
+) -> Result<SyncPreview, String> {
+    let upstream = git_optional(
+        root,
+        &[
+            "rev-parse",
+            "--abbrev-ref",
+            "--symbolic-full-name",
+            "@{upstream}",
+        ],
+    );
+    let origin_branch = format!("origin/{branch}");
+    let remote_reference = format!("refs/remotes/{origin_branch}");
+    let remote_branch = run_git(
+        root,
+        &["show-ref", "--verify", "--quiet", &remote_reference],
+    )?
+    .status
+    .success()
+    .then_some(origin_branch);
+    let (ahead, behind) = match remote_branch.as_deref() {
+        Some(reference) => {
+            let range = format!("HEAD...{reference}");
+            let counts = output_text(&run_git(
+                root,
+                &["rev-list", "--left-right", "--count", &range],
+            )?)?;
+            parse_ahead_behind(&counts)?
+        }
+        None => (0, 0),
+    };
+
+    Ok(SyncPreview {
+        repository: repository.clone(),
+        profile: profile.clone(),
+        branch,
+        remote_url,
+        upstream,
+        remote_branch,
+        changes: working_tree_changes(root)?,
+        ahead,
+        behind,
+        fetched_at: chrono::Utc::now().to_rfc3339(),
+    })
+}
+
+fn parse_ahead_behind(value: &str) -> Result<(u64, u64), String> {
+    let mut counts = value.split_whitespace();
+    let ahead = counts
+        .next()
+        .and_then(|count| count.parse::<u64>().ok())
+        .ok_or_else(|| "Git returned an invalid ahead count.".to_string())?;
+    let behind = counts
+        .next()
+        .and_then(|count| count.parse::<u64>().ok())
+        .ok_or_else(|| "Git returned an invalid behind count.".to_string())?;
+    if counts.next().is_some() {
+        return Err("Git returned invalid synchronization counts.".into());
+    }
+    Ok((ahead, behind))
+}
+
 pub fn validate_publish_source(repository: &RepositoryRecord) -> Result<(), String> {
     let root = repository_root(&repository.path)?;
     if git_optional(&root, &["config", "--get", "remote.origin.url"]).is_some() {
@@ -598,7 +722,7 @@ mod tests {
     };
 
     use super::{
-        build_commit_preview, commit_all_changes, create_working_branch,
+        build_commit_preview, commit_all_changes, create_working_branch, parse_ahead_behind,
         parse_working_tree_changes, run_git, validate_commit_message, validate_github_ssh_remote,
     };
     use crate::models::{Profile, RepositoryRecord};
@@ -608,6 +732,13 @@ mod tests {
         assert!(validate_github_ssh_remote("git@github.com:owner/repository.git").is_ok());
         assert!(validate_github_ssh_remote("https://github.com/owner/repository.git").is_err());
         assert!(validate_github_ssh_remote("git@github.com:owner/group/repository.git").is_err());
+    }
+
+    #[test]
+    fn parses_ahead_and_behind_counts() {
+        assert_eq!(parse_ahead_behind("3\t2").unwrap(), (3, 2));
+        assert!(parse_ahead_behind("3").is_err());
+        assert!(parse_ahead_behind("ahead behind").is_err());
     }
 
     #[test]

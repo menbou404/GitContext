@@ -25,6 +25,8 @@ pub fn run() {
             commands::clone_repository,
             commands::preview_push,
             commands::push_repository,
+            commands::preview_repository_sync,
+            commands::pull_repository,
             commands::preview_commit,
             commands::commit_repository,
             commands::preview_pull_request,

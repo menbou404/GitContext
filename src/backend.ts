@@ -22,6 +22,7 @@ import type {
   PullRequestResult,
   PushPreview,
   PushResult,
+  SyncPreview,
   RepositoryRecord,
 } from "./types";
 
@@ -313,6 +314,36 @@ export async function pushRepository(repositoryId: string, profileId: string): P
     };
   }
   return invoke<PushResult>("push_repository", { repositoryId, profileId });
+}
+
+export async function previewRepositorySync(repositoryId: string, profileId: string): Promise<SyncPreview> {
+  if (!inDesktopApp()) {
+    const repository = demoState.repositories.find((item) => item.id === repositoryId);
+    const profile = demoState.profiles.find((item) => item.id === profileId);
+    if (!repository || !profile || !repository.remoteUrl) throw new Error("Repository or profile was not found.");
+    const branch = repository.branch || "main";
+    return {
+      repository: structuredClone(repository),
+      profile: structuredClone(profile),
+      branch,
+      remoteUrl: repository.remoteUrl,
+      upstream: `origin/${branch}`,
+      remoteBranch: `origin/${branch}`,
+      changes: [],
+      ahead: 1,
+      behind: 2,
+      fetchedAt: new Date().toISOString(),
+    };
+  }
+  return invoke<SyncPreview>("preview_repository_sync", { repositoryId, profileId });
+}
+
+export async function pullRepository(repositoryId: string, profileId: string): Promise<SyncPreview> {
+  if (!inDesktopApp()) {
+    const preview = await previewRepositorySync(repositoryId, profileId);
+    return { ...preview, ahead: 0, behind: 0, fetchedAt: new Date().toISOString() };
+  }
+  return invoke<SyncPreview>("pull_repository", { repositoryId, profileId });
 }
 
 export async function previewCommit(repositoryId: string, profileId: string): Promise<CommitPreview> {

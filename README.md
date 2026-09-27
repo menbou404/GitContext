@@ -24,6 +24,7 @@ GitContextは、複数のGitHub作業Identityをリポジトリ単位で割り�
 - commitのみ、またはcommit後の通常pushを1回の画面から実行
 - 適用済みProfileのSSH鍵で現在ブランチを通常push
 - 既定ブランチから作業ブランチを作成し、commit・push・Pull Request作成までを案内
+- ProfileのSSH鍵でFetchし、ahead/behind確認、安全なFast-forward Pull、Pushを実行
 - 日本語・英語UI
 
 ## インストール
@@ -49,6 +50,7 @@ GitContextは認証tokenやSSH秘密鍵の内容を保存しません。GitHub C
 7. 現在ブランチと変更ファイルを確認し、「commitのみ」または「commitしてpush」を実行
 8. commit済みの変更だけを送る場合は、送信先とブランチを確認して通常push
 9. 「PRを作成」から作業ブランチ名、commit、PRタイトルと説明を確認してPull Requestを作成
+10. 「リポジトリを同期」からFetch後のahead/behindを確認し、安全にPullまたはPush
 
 ## 安全境界
 
@@ -62,6 +64,7 @@ GitContextは認証tokenやSSH秘密鍵の内容を保存しません。GitHub C
 - commit前に現在ブランチ、Profile、対象ファイルを表示し、コミットメッセージは1行200文字以内に制限する
 - 通常pushはGitHub SSH origin、適用済みProfile、現在ブランチを再検証し、force pushを提供しない
 - PR作成はProfile専用のGitHub CLI認証を使い、既存PRの重複作成を避け、途中失敗後に再開できる
+- Pullは作業ツリーがクリーンかつFast-forward可能な場合だけ実行し、自動merge/rebaseは行わない
 - 複数Git設定の途中失敗時は元の値へロールバックする
 
 詳細は[docs/MVP_DESIGN.md](docs/MVP_DESIGN.md)を参照してください。脆弱性の報告方法は[SECURITY.md](SECURITY.md)に記載しています。

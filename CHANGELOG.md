@@ -6,6 +6,7 @@
 
 ### Added
 
+- Profile-aware Fetch、ahead/behind表示、安全なFast-forward Pull、Pushをまとめたリポジトリ同期フロー
 - ProfileのGitHub一覧またはSSH URLからcloneし、同じIdentityを自動適用するフロー
 - 適用済みProfileのSSH鍵で現在ブランチを安全に通常pushするフロー
 - 現在ブランチと変更ファイルを確認し、commitのみ／commitしてpushを選べるフロー
