@@ -23,6 +23,8 @@ Profileは次の参照と公開設定をまとめる。
 
 ### Repository dashboard
 
+リモート設定済みのリポジトリでは、割り当て済みProfileのSSH鍵を使ってoriginをFetchし、現在ブランチのahead/behind、未コミット変更、追跡先を表示する。Pullは作業ツリーがクリーンで、リモートに対して遅れているだけのFast-forward可能な場合に限定する。分岐時に自動merge/rebaseは行わず、force pushも提供しない。
+
 - 左サイドバー: Profile一覧、準備状態、割当リポジトリ数
 - 上部: Git / gh / SSH のローカル環境検出結果
 - 中央: リポジトリ検索、Profile、適用状態

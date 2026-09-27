@@ -109,6 +109,19 @@ export interface PushResult {
   detail?: string | null;
 }
 
+export interface SyncPreview {
+  repository: RepositoryRecord;
+  profile: Profile;
+  branch: string;
+  remoteUrl: string;
+  upstream?: string | null;
+  remoteBranch?: string | null;
+  changes: WorkingTreeChange[];
+  ahead: number;
+  behind: number;
+  fetchedAt: string;
+}
+
 export interface WorkingTreeChange {
   status: string;
   path: string;

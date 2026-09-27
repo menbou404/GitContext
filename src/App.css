@@ -116,6 +116,8 @@ svg { width: 20px; height: 20px; }
 .button--publish:hover { border-color: #94bacd; background: #e4f1f7; }
 .button--push { margin-top: 8px; color: #fff; border-color: #315f50; background: #467565; }
 .button--push:hover { background: #385f52; transform: translateY(-1px); }
+.button--sync { margin-top: 8px; color: #27566e; border-color: #bfd5df; background: #edf6fa; }
+.button--sync:hover { border-color: #8eb7ca; background: #e2f0f6; }
 .button--commit { margin-top: 8px; color: #315c4e; border-color: #bfd3cb; background: #eef6f2; }
 .button--commit:hover { border-color: #8fb3a6; background: #e4f1eb; }
 .button--pr { margin-top: 8px; color: #3f477d; border-color: #c9cde3; background: #f1f2fa; }
@@ -212,6 +214,7 @@ svg { width: 20px; height: 20px; }
 .apply-modal { width: min(620px, calc(100vw - 60px)); }
 .publish-modal { width: min(620px, calc(100vw - 60px)); }
 .push-modal { width: min(620px, calc(100vw - 60px)); }
+.sync-modal { width: min(640px, calc(100vw - 60px)); }
 .commit-modal { width: min(660px, calc(100vw - 60px)); }
 .pull-request-modal { width: min(700px, calc(100vw - 60px)); }
 .clone-modal { width: min(720px, calc(100vw - 60px)); }
@@ -306,6 +309,17 @@ svg { width: 20px; height: 20px; }
 .push-safety-note strong { font-size: 9px; }
 .push-safety-note span { margin-top: 3px; font-size: 8px; line-height: 1.45; }
 .push-safety-note small { margin-top: 5px; color: #789087; font-size: 7px; }
+.sync-counts { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-top: 13px; }
+.sync-counts > div { display: flex; align-items: baseline; gap: 7px; padding: 12px; color: #687a74; border: 1px solid #e0e7e3; border-radius: 9px; background: #fafcfb; }
+.sync-counts > div.has-count { color: #2d6351; border-color: #bdd8cd; background: #eff7f3; }
+.sync-counts strong { font-size: 20px; line-height: 1; }
+.sync-counts span { font-size: 8px; font-weight: 700; }
+.sync-ready { display: flex; align-items: flex-start; gap: 9px; margin-top: 14px; padding: 11px; color: #456c5e; border: 1px solid #c6ddd4; border-radius: 9px; background: #eff7f3; }
+.sync-ready > svg { width: 16px; flex: 0 0 auto; }
+.sync-ready strong, .sync-ready span { display: block; }
+.sync-ready strong { font-size: 9px; }
+.sync-ready span { margin-top: 3px; font-size: 8px; }
+.sync-actions { flex-wrap: wrap; }
 .commit-change-heading { margin: 13px 0 7px; color: #687873; font-size: 8px; font-weight: 750; }
 .commit-change-list { max-height: 150px; overflow-y: auto; border: 1px solid #e0e7e3; border-radius: 9px; background: #fafcfb; }
 .commit-change-row { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 9px; align-items: center; padding: 8px 10px; border-top: 1px solid #e8eeeb; }

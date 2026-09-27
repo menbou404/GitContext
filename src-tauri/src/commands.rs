@@ -21,7 +21,7 @@ use crate::{
         BootstrapResult, BranchResult, CloneResult, CommitPreview, CommitResult, EnvironmentStatus,
         GhProfileStatus, GithubRepository, Profile, PublishResult, PullRequestPreview,
         PullRequestResult, PullRequestSummary, PushPreview, PushResult, RepositoryRecord,
-        ToolStatus,
+        SyncPreview, ToolStatus,
     },
     storage,
 };
@@ -483,6 +483,56 @@ pub async fn push_repository(
     })
     .await
     .map_err(|error| format!("Git push task failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn preview_repository_sync(
+    app: AppHandle,
+    gate: State<'_, AppGate>,
+    repository_id: String,
+    profile_id: String,
+) -> Result<SyncPreview, String> {
+    let (repository, profile) = {
+        let _guard = gate
+            .0
+            .lock()
+            .map_err(|_| "GitContext's state lock is unavailable.")?;
+        let data = storage::load(&app)?;
+        let (repository, profile) = find_assignment(&data, &repository_id, &profile_id)?;
+        ensure_applied_assignment(repository, profile, &profile_id, "syncing with GitHub")?;
+        (repository.clone(), profile.clone())
+    };
+
+    tauri::async_runtime::spawn_blocking(move || {
+        git_ops::refresh_sync_preview(&repository, &profile)
+    })
+    .await
+    .map_err(|error| format!("Git fetch task failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn pull_repository(
+    app: AppHandle,
+    gate: State<'_, AppGate>,
+    repository_id: String,
+    profile_id: String,
+) -> Result<SyncPreview, String> {
+    let (repository, profile) = {
+        let _guard = gate
+            .0
+            .lock()
+            .map_err(|_| "GitContext's state lock is unavailable.")?;
+        let data = storage::load(&app)?;
+        let (repository, profile) = find_assignment(&data, &repository_id, &profile_id)?;
+        ensure_applied_assignment(repository, profile, &profile_id, "syncing with GitHub")?;
+        (repository.clone(), profile.clone())
+    };
+
+    tauri::async_runtime::spawn_blocking(move || {
+        git_ops::pull_current_branch(&repository, &profile)
+    })
+    .await
+    .map_err(|error| format!("Git pull task failed: {error}"))?
 }
 
 #[tauri::command]

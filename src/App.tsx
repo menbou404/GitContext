@@ -20,7 +20,9 @@ import {
   previewCommit,
   previewPullRequest,
   previewPush,
+  previewRepositorySync,
   publishRepository,
+  pullRepository,
   pushRepository,
   removeRepository,
   saveProfile,
@@ -41,7 +43,7 @@ import {
   TerminalIcon,
   TrashIcon,
 } from "./Icons";
-import type { AppData, ApplyPreview, BootstrapResult, CloneOptions, CommitPreview, GhProfileStatus, GithubAuthPrompt, GithubRepository, Profile, PublishOptions, PullRequestPreview, PullRequestResult, PushPreview, RepositoryRecord, RepositoryVisibility } from "./types";
+import type { AppData, ApplyPreview, BootstrapResult, CloneOptions, CommitPreview, GhProfileStatus, GithubAuthPrompt, GithubRepository, Profile, PublishOptions, PullRequestPreview, PullRequestResult, PushPreview, RepositoryRecord, RepositoryVisibility, SyncPreview } from "./types";
 import { compactPath, initials, profileIsComplete } from "./types";
 import { localizeRuntimeMessage, uiCopy, type Locale } from "./i18n";
 import "./App.css";
@@ -569,6 +571,93 @@ function PushDialog({
   );
 }
 
+function SyncDialog({
+  preview,
+  locale,
+  onClose,
+  onRefresh,
+  onPull,
+  onPush,
+}: {
+  preview: SyncPreview;
+  locale: Locale;
+  onClose: () => void;
+  onRefresh: () => Promise<SyncPreview>;
+  onPull: () => Promise<SyncPreview>;
+  onPush: () => Promise<SyncPreview>;
+}) {
+  const copy = uiCopy[locale];
+  const [action, setAction] = useState<"fetch" | "pull" | "push" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const running = action !== null;
+  const diverged = preview.ahead > 0 && preview.behind > 0;
+  const dirty = preview.changes.length > 0;
+  const canPull = preview.behind > 0 && preview.ahead === 0 && !dirty && Boolean(preview.remoteBranch);
+  const canPush = !diverged && (preview.ahead > 0 || !preview.remoteBranch);
+  const upToDate = Boolean(preview.remoteBranch) && preview.ahead === 0 && preview.behind === 0;
+
+  const run = async (nextAction: "fetch" | "pull" | "push") => {
+    setAction(nextAction);
+    setError(null);
+    try {
+      if (nextAction === "fetch") await onRefresh();
+      if (nextAction === "pull") await onPull();
+      if (nextAction === "push") await onPush();
+      setAction(null);
+    } catch (cause) {
+      setError(messageFrom(cause, locale));
+      setAction(null);
+    }
+  };
+
+  return (
+    <div className="modal-layer" role="presentation" onMouseDown={onClose}>
+      <section className="modal sync-modal" role="dialog" aria-modal="true" aria-labelledby="sync-title" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="modal-header">
+          <div><p className="eyebrow">Git</p><h2 id="sync-title">{copy.syncDialogTitle}</h2></div>
+          <button className="icon-button" type="button" onClick={onClose} aria-label={copy.close}><CloseIcon /></button>
+        </div>
+        <p className="modal-lead">{copy.syncDialogLead}</p>
+
+        <div className="publish-destination">
+          <ProfileAvatar profile={preview.profile} />
+          <div><span>{copy.syncProfile}</span><strong>{preview.profile.label}{preview.profile.githubUsername ? ` · @${preview.profile.githubUsername}` : ""}</strong></div>
+        </div>
+
+        <dl className="push-details">
+          <div><dt>{copy.repository}</dt><dd>{preview.repository.name}</dd></div>
+          <div><dt>{copy.syncBranch}</dt><dd>{preview.branch}</dd></div>
+          <div><dt>{copy.syncTracking}</dt><dd>{preview.upstream || preview.remoteBranch || copy.noRemoteBranch}</dd></div>
+          <div><dt>{copy.lastFetched}</dt><dd>{new Date(preview.fetchedAt).toLocaleString(locale === "ja" ? "ja-JP" : "en-US")}</dd></div>
+        </dl>
+
+        <div className="sync-counts">
+          <div className={preview.ahead > 0 ? "has-count" : ""}><strong>{preview.ahead}</strong><span>{copy.aheadCommits}</span></div>
+          <div className={preview.behind > 0 ? "has-count" : ""}><strong>{preview.behind}</strong><span>{copy.behindCommits}</span></div>
+        </div>
+
+        {upToDate && <div className="sync-ready"><CheckIcon /><div><strong>{copy.repositoryUpToDate}</strong><span>{copy.repositoryUpToDateLead}</span></div></div>}
+        {!preview.remoteBranch && <div className="warning-note"><AlertIcon />{copy.remoteBranchMissing}</div>}
+        {diverged && <div className="warning-note"><AlertIcon /><div><strong>{copy.branchesDiverged}</strong><br />{copy.branchesDivergedLead}</div></div>}
+        {dirty && <div className="warning-note"><AlertIcon />{copy.pullBlockedByChanges(preview.changes.length)}</div>}
+        {error && <div className="inline-error"><AlertIcon />{error}</div>}
+
+        <div className="push-safety-note">
+          <ShieldIcon />
+          <div><strong>{copy.fastForwardOnly}</strong><span>{copy.fastForwardOnlyLead}</span></div>
+        </div>
+
+        <div className="modal-actions sync-actions">
+          <button className="button button--ghost" type="button" onClick={onClose} disabled={running}>{copy.close}</button>
+          <button className="button button--ghost" type="button" onClick={() => run("fetch")} disabled={running}>{action === "fetch" ? copy.fetching : copy.fetchAgain}</button>
+          <button className="button button--ghost" type="button" onClick={() => run("pull")} disabled={!canPull || running}>{action === "pull" ? copy.pulling : copy.pullChanges}</button>
+          <button className="button button--primary" type="button" onClick={() => run("push")} disabled={!canPush || running}>{action === "push" ? copy.pushingBranch : copy.pushChanges}</button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function CommitDialog({
   preview,
   locale,
@@ -1007,6 +1096,7 @@ function App({ locale = "en" }: { locale?: Locale }) {
   const [preview, setPreview] = useState<ApplyPreview | null>(null);
   const [publishTarget, setPublishTarget] = useState<{ repository: RepositoryRecord; profile: Profile } | null>(null);
   const [pushPreview, setPushPreview] = useState<PushPreview | null>(null);
+  const [syncPreview, setSyncPreview] = useState<SyncPreview | null>(null);
   const [commitPreview, setCommitPreview] = useState<CommitPreview | null>(null);
   const [pullRequestPreview, setPullRequestPreview] = useState<PullRequestPreview | null>(null);
   const [busy, setBusy] = useState(false);
@@ -1133,6 +1223,53 @@ function App({ locale = "en" }: { locale?: Locale }) {
     const result = await pushRepository(pushPreview.repository.id, pushPreview.profile.id);
     setPushPreview(null);
     setNotice(copy.pushCompleted(result.branch));
+  };
+
+  const storeSyncPreview = (nextPreview: SyncPreview) => {
+    setSyncPreview(nextPreview);
+    setResult((current) => current ? {
+      ...current,
+      data: {
+        ...current.data,
+        repositories: current.data.repositories.map((repository) => repository.id === nextPreview.repository.id
+          ? { ...repository, branch: nextPreview.branch, remoteUrl: nextPreview.remoteUrl }
+          : repository),
+      },
+    } : current);
+    return nextPreview;
+  };
+
+  const reviewSync = async () => {
+    if (!selectedRepository || !assignedProfile) return;
+    setNotice(null);
+    setBusy(true);
+    try {
+      storeSyncPreview(await previewRepositorySync(selectedRepository.id, assignedProfile.id));
+    } catch (error) {
+      setNotice(messageFrom(error, locale));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const refreshSync = async () => {
+    if (!syncPreview) throw new Error(copy.somethingWentWrong);
+    return storeSyncPreview(await previewRepositorySync(syncPreview.repository.id, syncPreview.profile.id));
+  };
+
+  const pullSync = async () => {
+    if (!syncPreview) throw new Error(copy.somethingWentWrong);
+    const refreshed = storeSyncPreview(await pullRepository(syncPreview.repository.id, syncPreview.profile.id));
+    setNotice(copy.pullCompleted(refreshed.branch));
+    return refreshed;
+  };
+
+  const pushSync = async () => {
+    if (!syncPreview) throw new Error(copy.somethingWentWrong);
+    const result = await pushRepository(syncPreview.repository.id, syncPreview.profile.id);
+    const refreshed = storeSyncPreview(await previewRepositorySync(syncPreview.repository.id, syncPreview.profile.id));
+    setNotice(copy.pushCompleted(result.branch));
+    return refreshed;
   };
 
   const reviewCommit = async () => {
@@ -1396,6 +1533,7 @@ function App({ locale = "en" }: { locale?: Locale }) {
                 {selectedRepository.remoteUrl ? (
                   <>
                     <div className="remote-ready"><CheckIcon /><div><strong>{copy.githubRemoteReady}</strong><span title={selectedRepository.remoteUrl}>{compactPath(selectedRepository.remoteUrl, 38)}</span></div></div>
+                    <button className="button button--sync button--wide" disabled={!assignedProfile || !selectedRepository.lastAppliedAt || busy} onClick={reviewSync}><BranchIcon />{copy.syncButton}</button>
                     <button className="button button--commit button--wide" disabled={!assignedProfile || !selectedRepository.lastAppliedAt || busy} onClick={reviewCommit}><CheckIcon />{copy.commitButton}</button>
                     <button className="button button--pr button--wide" disabled={!assignedProfile?.githubUsername || !assignedProfile.ghConfigDir || !selectedRepository.lastAppliedAt || busy} onClick={reviewPullRequest}><BranchIcon />{copy.pullRequestButton}</button>
                     <button className="button button--push button--wide" disabled={!assignedProfile || !selectedRepository.lastAppliedAt || busy} onClick={reviewPush}><BranchIcon />{copy.pushButton}</button>
@@ -1418,6 +1556,7 @@ function App({ locale = "en" }: { locale?: Locale }) {
       {preview && <ApplyDialog preview={preview} locale={locale} onClose={() => setPreview(null)} onApply={applyProfileAction} />}
       {publishTarget && <PublishDialog repository={publishTarget.repository} profile={publishTarget.profile} locale={locale} onClose={() => setPublishTarget(null)} onPublish={publishRepositoryAction} />}
       {pushPreview && <PushDialog preview={pushPreview} locale={locale} onClose={() => setPushPreview(null)} onPush={pushRepositoryAction} />}
+      {syncPreview && <SyncDialog preview={syncPreview} locale={locale} onClose={() => setSyncPreview(null)} onRefresh={refreshSync} onPull={pullSync} onPush={pushSync} />}
       {commitPreview && <CommitDialog preview={commitPreview} locale={locale} onClose={() => setCommitPreview(null)} onCommit={commitRepositoryAction} />}
       {pullRequestPreview && <PullRequestDialog preview={pullRequestPreview} locale={locale} onClose={() => setPullRequestPreview(null)} onRefresh={refreshPullRequest} onCreate={createPullRequestAction} />}
     </div>
