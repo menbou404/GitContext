@@ -19,7 +19,8 @@ use crate::{
     models::{
         normalize_profile, validate_profile, validate_profile_id, AppData, ApplyPreview,
         BootstrapResult, BranchResult, CloneResult, CommitPreview, CommitResult, EnvironmentStatus,
-        GhProfileStatus, GithubRepository, Profile, PublishResult, PullRequestPreview,
+        GhProfileStatus, GithubRepository, ManagedPullRequest, MergePullRequestResult, Profile,
+        PublishResult, PullRequestCheck, PullRequestManagement, PullRequestPreview,
         PullRequestResult, PullRequestSummary, PushPreview, PushResult, RepositoryRecord,
         SyncPreview, ToolStatus,
     },
@@ -58,6 +59,41 @@ pub struct CreatePullRequestInput {
     title: String,
     body: String,
     draft: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MergePullRequestInput {
+    repository_id: String,
+    profile_id: String,
+    number: u64,
+    strategy: String,
+    expected_head_oid: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GithubPullRequest {
+    number: u64,
+    url: String,
+    title: String,
+    state: String,
+    is_draft: bool,
+    base_ref_name: String,
+    head_ref_name: String,
+    head_ref_oid: String,
+    mergeable: String,
+    merge_state_status: String,
+    #[serde(default)]
+    review_decision: String,
+    #[serde(default)]
+    author: Option<serde_json::Value>,
+    #[serde(default)]
+    updated_at: String,
+    #[serde(default)]
+    merged_at: Option<String>,
+    #[serde(default)]
+    status_check_rollup: Vec<serde_json::Value>,
 }
 
 #[tauri::command]
@@ -784,6 +820,157 @@ pub async fn create_pull_request(
 }
 
 #[tauri::command]
+pub async fn list_pull_requests(
+    app: AppHandle,
+    gate: State<'_, AppGate>,
+    repository_id: String,
+    profile_id: String,
+) -> Result<PullRequestManagement, String> {
+    let (repository, profile) = {
+        let _guard = gate
+            .0
+            .lock()
+            .map_err(|_| "GitContext's state lock is unavailable.")?;
+        let data = storage::load(&app)?;
+        let (repository, profile) = find_assignment(&data, &repository_id, &profile_id)?;
+        ensure_applied_assignment(repository, profile, &profile_id, "managing pull requests")?;
+        (repository.clone(), profile.clone())
+    };
+    let directory = connected_gh_directory(&app, &profile)?;
+    let repository_name_with_owner = github_repository_name(&repository)?;
+    let result_repository = repository.clone();
+    let result_profile = profile.clone();
+    let result_name = repository_name_with_owner.clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut command = gh_command(&directory);
+        let output = command
+            .current_dir(&repository.path)
+            .args([
+                "pr",
+                "list",
+                "--repo",
+                repository_name_with_owner.as_str(),
+                "--state",
+                "open",
+                "--limit",
+                "30",
+                "--json",
+                pull_request_json_fields(),
+            ])
+            .output()
+            .map_err(|error| format!("Could not start GitHub CLI: {error}"))?;
+        let text = github_output_text(&output)?;
+        let items: Vec<GithubPullRequest> = serde_json::from_str(&text)
+            .map_err(|error| format!("GitHub CLI returned invalid pull request data: {error}"))?;
+        Ok(PullRequestManagement {
+            repository: result_repository,
+            profile: result_profile,
+            repository_name_with_owner: result_name,
+            pull_requests: items.into_iter().map(normalize_pull_request).collect(),
+        })
+    })
+    .await
+    .map_err(|error| format!("Pull request listing task failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn merge_pull_request(
+    app: AppHandle,
+    gate: State<'_, AppGate>,
+    input: MergePullRequestInput,
+) -> Result<MergePullRequestResult, String> {
+    if input.number == 0 {
+        return Err("Pull request number must be positive.".into());
+    }
+    if input.expected_head_oid.is_empty()
+        || input.expected_head_oid.len() > 64
+        || !input
+            .expected_head_oid
+            .chars()
+            .all(|character| character.is_ascii_hexdigit())
+    {
+        return Err("The expected pull request commit is invalid. Refresh and try again.".into());
+    }
+    let strategy_flag = match input.strategy.as_str() {
+        "squash" => "--squash",
+        "merge" => "--merge",
+        "rebase" => "--rebase",
+        _ => return Err("Merge strategy must be squash, merge, or rebase.".into()),
+    };
+    let (repository, profile) = {
+        let _guard = gate
+            .0
+            .lock()
+            .map_err(|_| "GitContext's state lock is unavailable.")?;
+        let data = storage::load(&app)?;
+        let (repository, profile) =
+            find_assignment(&data, &input.repository_id, &input.profile_id)?;
+        ensure_applied_assignment(
+            repository,
+            profile,
+            &input.profile_id,
+            "merging a pull request",
+        )?;
+        (repository.clone(), profile.clone())
+    };
+    let directory = connected_gh_directory(&app, &profile)?;
+    let repository_name_with_owner = github_repository_name(&repository)?;
+    let number = input.number;
+    let expected_head_oid = input.expected_head_oid;
+    let strategy = input.strategy;
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let pull_request = read_pull_request(
+            &directory,
+            &repository.path,
+            &repository_name_with_owner,
+            number,
+        )?;
+        validate_pull_request_for_merge(&pull_request, &expected_head_oid)?;
+
+        let number_text = number.to_string();
+        let mut command = gh_command(&directory);
+        let output = command
+            .current_dir(&repository.path)
+            .args([
+                "pr",
+                "merge",
+                number_text.as_str(),
+                "--repo",
+                repository_name_with_owner.as_str(),
+                strategy_flag,
+                "--match-head-commit",
+                expected_head_oid.as_str(),
+            ])
+            .output()
+            .map_err(|error| format!("Could not start GitHub CLI: {error}"))?;
+        github_output_text(&output)?;
+
+        let merged = read_pull_request(
+            &directory,
+            &repository.path,
+            &repository_name_with_owner,
+            number,
+        )?;
+        if merged.state != "MERGED" {
+            return Err(
+                "GitHub accepted the merge command, but the pull request is not merged.".into(),
+            );
+        }
+        Ok(MergePullRequestResult {
+            number: merged.number,
+            url: merged.url,
+            title: merged.title,
+            strategy,
+            merged_at: merged.merged_at,
+        })
+    })
+    .await
+    .map_err(|error| format!("Pull request merge task failed: {error}"))?
+}
+
+#[tauri::command]
 pub async fn publish_repository(
     app: AppHandle,
     gate: State<'_, AppGate>,
@@ -1042,6 +1229,136 @@ fn github_default_branch(
         return Err("GitHub did not return a default branch for this repository.".into());
     }
     Ok(branch)
+}
+
+fn pull_request_json_fields() -> &'static str {
+    "number,url,title,state,isDraft,baseRefName,headRefName,headRefOid,mergeable,mergeStateStatus,reviewDecision,author,updatedAt,mergedAt,statusCheckRollup"
+}
+
+fn read_pull_request(
+    directory: &Path,
+    repository_path: &str,
+    repository_name_with_owner: &str,
+    number: u64,
+) -> Result<GithubPullRequest, String> {
+    let number = number.to_string();
+    let mut command = gh_command(directory);
+    let output = command
+        .current_dir(repository_path)
+        .args([
+            "pr",
+            "view",
+            number.as_str(),
+            "--repo",
+            repository_name_with_owner,
+            "--json",
+            pull_request_json_fields(),
+        ])
+        .output()
+        .map_err(|error| format!("Could not start GitHub CLI: {error}"))?;
+    let text = github_output_text(&output)?;
+    serde_json::from_str(&text)
+        .map_err(|error| format!("GitHub CLI returned invalid pull request data: {error}"))
+}
+
+fn normalize_pull_request(item: GithubPullRequest) -> ManagedPullRequest {
+    let author = item
+        .author
+        .as_ref()
+        .and_then(|value| value.get("login"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
+    ManagedPullRequest {
+        number: item.number,
+        url: item.url,
+        title: item.title,
+        state: item.state,
+        is_draft: item.is_draft,
+        base_branch: item.base_ref_name,
+        head_branch: item.head_ref_name,
+        head_oid: item.head_ref_oid,
+        mergeable: item.mergeable,
+        merge_state_status: item.merge_state_status,
+        review_decision: item.review_decision,
+        author,
+        updated_at: item.updated_at,
+        checks: item
+            .status_check_rollup
+            .iter()
+            .map(normalize_pull_request_check)
+            .collect(),
+    }
+}
+
+fn normalize_pull_request_check(value: &serde_json::Value) -> PullRequestCheck {
+    let text = |key: &str| {
+        value
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    };
+    let name = text("name")
+        .or_else(|| text("context"))
+        .unwrap_or_else(|| "GitHub check".into());
+    let state = text("conclusion")
+        .or_else(|| text("state"))
+        .or_else(|| text("status"))
+        .unwrap_or_else(|| "PENDING".into())
+        .to_ascii_uppercase();
+    let bucket = check_bucket(&state).to_string();
+    PullRequestCheck {
+        name,
+        state,
+        bucket,
+        link: text("detailsUrl").or_else(|| text("targetUrl")),
+        workflow: text("workflowName"),
+    }
+}
+
+fn check_bucket(state: &str) -> &'static str {
+    match state {
+        "SUCCESS" | "NEUTRAL" => "pass",
+        "SKIPPED" => "skipping",
+        "CANCELLED" => "cancel",
+        "FAILURE" | "ERROR" | "TIMED_OUT" | "ACTION_REQUIRED" | "STARTUP_FAILURE" | "STALE" => {
+            "fail"
+        }
+        _ => "pending",
+    }
+}
+
+fn validate_pull_request_for_merge(
+    pull_request: &GithubPullRequest,
+    expected_head_oid: &str,
+) -> Result<(), String> {
+    if pull_request.state != "OPEN" {
+        return Err("Only an open pull request can be merged.".into());
+    }
+    if pull_request.is_draft {
+        return Err("Mark the pull request ready for review before merging it.".into());
+    }
+    if pull_request.head_ref_oid != expected_head_oid {
+        return Err("The pull request received new commits. Refresh it before merging.".into());
+    }
+    if pull_request.mergeable != "MERGEABLE" || pull_request.merge_state_status != "CLEAN" {
+        return Err("GitHub reports that this pull request is not currently safe to merge.".into());
+    }
+    if pull_request.review_decision == "CHANGES_REQUESTED" {
+        return Err("Resolve requested review changes before merging this pull request.".into());
+    }
+    let checks: Vec<PullRequestCheck> = pull_request
+        .status_check_rollup
+        .iter()
+        .map(normalize_pull_request_check)
+        .collect();
+    if checks
+        .iter()
+        .any(|check| !matches!(check.bucket.as_str(), "pass" | "skipping"))
+    {
+        return Err("Wait for all CI checks to pass before merging this pull request.".into());
+    }
+    Ok(())
 }
 
 fn find_existing_pull_request(
@@ -1320,8 +1637,9 @@ fn inspect_gh_directory(directory: &Path) -> GhProfileStatus {
 #[cfg(test)]
 mod tests {
     use super::{
-        extract_github_device_code, validate_github_repository_name, validate_github_ssh_url,
-        validate_pull_request_body, validate_pull_request_title,
+        check_bucket, extract_github_device_code, validate_github_repository_name,
+        validate_github_ssh_url, validate_pull_request_body, validate_pull_request_for_merge,
+        validate_pull_request_title, GithubPullRequest,
     };
 
     #[test]
@@ -1371,5 +1689,43 @@ mod tests {
             "Summary\n\n- Tested"
         );
         assert!(validate_pull_request_body("invalid\0body").is_err());
+    }
+
+    #[test]
+    fn categorizes_github_check_states() {
+        assert_eq!(check_bucket("SUCCESS"), "pass");
+        assert_eq!(check_bucket("SKIPPED"), "skipping");
+        assert_eq!(check_bucket("FAILURE"), "fail");
+        assert_eq!(check_bucket("CANCELLED"), "cancel");
+        assert_eq!(check_bucket("IN_PROGRESS"), "pending");
+    }
+
+    #[test]
+    fn only_allows_a_fresh_clean_pull_request_with_finished_checks() {
+        let ready = serde_json::json!({
+            "number": 8,
+            "url": "https://github.com/example/repo/pull/8",
+            "title": "Ready",
+            "state": "OPEN",
+            "isDraft": false,
+            "baseRefName": "main",
+            "headRefName": "feature/ready",
+            "headRefOid": "0123456789abcdef0123456789abcdef01234567",
+            "mergeable": "MERGEABLE",
+            "mergeStateStatus": "CLEAN",
+            "reviewDecision": "APPROVED",
+            "author": { "login": "example" },
+            "updatedAt": "2026-09-27T00:00:00Z",
+            "mergedAt": null,
+            "statusCheckRollup": [{ "name": "CI", "status": "COMPLETED", "conclusion": "SUCCESS" }]
+        });
+        let mut pull_request: GithubPullRequest = serde_json::from_value(ready).unwrap();
+        let head = pull_request.head_ref_oid.clone();
+        assert!(validate_pull_request_for_merge(&pull_request, &head).is_ok());
+        pull_request.status_check_rollup = vec![serde_json::json!({
+            "name": "CI", "status": "IN_PROGRESS", "conclusion": ""
+        })];
+        assert!(validate_pull_request_for_merge(&pull_request, &head).is_err());
+        assert!(validate_pull_request_for_merge(&pull_request, "ffffffff").is_err());
     }
 }

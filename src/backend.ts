@@ -14,12 +14,15 @@ import type {
   GhProfileStatus,
   GithubRepository,
   GithubAuthPrompt,
+  MergePullRequestOptions,
+  MergePullRequestResult,
   Profile,
   PublishOptions,
   PublishResult,
   PullRequestCreateOptions,
   PullRequestPreview,
   PullRequestResult,
+  PullRequestManagement,
   PushPreview,
   PushResult,
   SyncPreview,
@@ -27,6 +30,7 @@ import type {
 } from "./types";
 
 let demoState: AppData = structuredClone(demoBootstrap.data);
+const demoMergedPullRequests = new Set<number>();
 
 const inDesktopApp = () => isTauri();
 
@@ -437,4 +441,76 @@ export async function createPullRequest(options: PullRequestCreateOptions): Prom
     };
   }
   return invoke<PullRequestResult>("create_pull_request", { input: options });
+}
+
+export async function listPullRequests(
+  repositoryId: string,
+  profileId: string,
+): Promise<PullRequestManagement> {
+  if (!inDesktopApp()) {
+    const repository = demoState.repositories.find((item) => item.id === repositoryId);
+    const profile = demoState.profiles.find((item) => item.id === profileId);
+    if (!repository || !profile || !repository.remoteUrl) throw new Error("Repository or profile was not found.");
+    const repositoryNameWithOwner = repository.remoteUrl
+      .replace("git@github.com:", "")
+      .replace(/\.git$/, "");
+    const pullRequests: PullRequestManagement["pullRequests"] = [
+      {
+        number: 18,
+        url: `https://github.com/${repositoryNameWithOwner}/pull/18`,
+        title: "Add pull request management",
+        state: "OPEN",
+        isDraft: false,
+        baseBranch: "main",
+        headBranch: "codex/pr-management",
+        headOid: "0123456789abcdef0123456789abcdef01234567",
+        mergeable: "MERGEABLE",
+        mergeStateStatus: "CLEAN",
+        reviewDecision: "APPROVED",
+        author: profile.githubUsername || "connected-account",
+        updatedAt: new Date().toISOString(),
+        checks: [
+          { name: "Frontend tests", state: "SUCCESS", bucket: "pass" as const, workflow: "CI", link: null },
+          { name: "Rust tests", state: "SUCCESS", bucket: "pass" as const, workflow: "CI", link: null },
+        ],
+      },
+      {
+        number: 19,
+        url: `https://github.com/${repositoryNameWithOwner}/pull/19`,
+        title: "Update documentation",
+        state: "OPEN",
+        isDraft: false,
+        baseBranch: "main",
+        headBranch: "docs/update-guide",
+        headOid: "89abcdef0123456789abcdef0123456789abcdef",
+        mergeable: "MERGEABLE",
+        mergeStateStatus: "BLOCKED",
+        reviewDecision: "",
+        author: profile.githubUsername || "connected-account",
+        updatedAt: new Date(Date.now() - 3_600_000).toISOString(),
+        checks: [{ name: "Verify on Windows", state: "IN_PROGRESS", bucket: "pending" as const, workflow: "CI", link: null }],
+      },
+    ].filter((item) => !demoMergedPullRequests.has(item.number));
+    return {
+      repository: structuredClone(repository),
+      profile: structuredClone(profile),
+      repositoryNameWithOwner,
+      pullRequests,
+    };
+  }
+  return invoke<PullRequestManagement>("list_pull_requests", { repositoryId, profileId });
+}
+
+export async function mergePullRequest(options: MergePullRequestOptions): Promise<MergePullRequestResult> {
+  if (!inDesktopApp()) {
+    demoMergedPullRequests.add(options.number);
+    return {
+      number: options.number,
+      url: `https://github.com/example/example/pull/${options.number}`,
+      title: "Add pull request management",
+      strategy: options.strategy,
+      mergedAt: new Date().toISOString(),
+    };
+  }
+  return invoke<MergePullRequestResult>("merge_pull_request", { input: options });
 }

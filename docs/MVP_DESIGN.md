@@ -88,7 +88,15 @@ Profileは次の参照と公開設定をまとめる。
 - PRタイトル、本文、Draft指定をGUIで受け取り、`gh pr create`へ固定引数として渡す
 - Profile専用の`GH_CONFIG_DIR`と、Profileに一致するGitHub認証だけを使用する
 - 各段階の成功は取り消さず、失敗後は現在状態を再検出して残りの処理から再開する
-- merge、remoteブランチ削除、ローカルブランチ削除は自動実行しない
+- PR作成フローではmerge、remoteブランチ削除、ローカルブランチ削除を自動実行しない
+
+### Pull Request確認・merge
+
+- 開いているPR、作業ブランチ、マージ先、レビュー判定、CIチェックをProfile専用の`GH_CONFIG_DIR`で取得する
+- Draft、CI実行中・失敗・キャンセル、競合、変更要求、GitHubのブランチルールによる停止をGUIで明示する
+- mergeはユーザーが方法を選び、対象PRを確認するチェックを入れた場合だけ実行する
+- 実行直前にPRを再取得し、一覧表示時の先頭commitと一致する場合だけ`--match-head-commit`付きでmergeする
+- 管理者権限による強制merge、自動merge、force、remote／localブランチの自動削除は提供しない
 
 ## データモデル
 
@@ -147,6 +155,7 @@ GitHub CLIが発行したワンタイムコードはTauri eventで認証中の�
 - 適用済みProfileによる既存GitHubリポジトリの現在ブランチpush
 - 現在ブランチと変更一覧を確認する一括commit、およびcommit後の通常push
 - 作業ブランチ作成からcommit、push、Pull Request作成までの再開可能なガイドフロー
+- Pull Request一覧、CI・競合・レビュー状態の確認、先頭commitを固定した明示的なmerge
 - ブラウザ用interactive previewとフロントエンドテスト
 
 次の候補:

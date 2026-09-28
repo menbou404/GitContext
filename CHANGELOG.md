@@ -11,6 +11,7 @@
 - 適用済みProfileのSSH鍵で現在ブランチを安全に通常pushするフロー
 - 現在ブランチと変更ファイルを確認し、commitのみ／commitしてpushを選べるフロー
 - 作業ブランチ作成、commit、push、Pull Request作成を安全に案内する再開可能なフロー
+- 開いているPull Request、CI、競合、レビュー状態の確認と、先頭commitを固定した安全なmergeフロー
 
 ### Planned
 

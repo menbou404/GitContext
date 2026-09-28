@@ -185,6 +185,58 @@ export interface PullRequestCreateOptions {
   draft: boolean;
 }
 
+export type PullRequestCheckBucket = "pass" | "fail" | "pending" | "skipping" | "cancel";
+
+export interface PullRequestCheck {
+  name: string;
+  state: string;
+  bucket: PullRequestCheckBucket;
+  link?: string | null;
+  workflow?: string | null;
+}
+
+export interface ManagedPullRequest {
+  number: number;
+  url: string;
+  title: string;
+  state: string;
+  isDraft: boolean;
+  baseBranch: string;
+  headBranch: string;
+  headOid: string;
+  mergeable: string;
+  mergeStateStatus: string;
+  reviewDecision: string;
+  author?: string | null;
+  updatedAt: string;
+  checks: PullRequestCheck[];
+}
+
+export interface PullRequestManagement {
+  repository: RepositoryRecord;
+  profile: Profile;
+  repositoryNameWithOwner: string;
+  pullRequests: ManagedPullRequest[];
+}
+
+export type MergeStrategy = "squash" | "merge" | "rebase";
+
+export interface MergePullRequestOptions {
+  repositoryId: string;
+  profileId: string;
+  number: number;
+  strategy: MergeStrategy;
+  expectedHeadOid: string;
+}
+
+export interface MergePullRequestResult {
+  number: number;
+  url: string;
+  title: string;
+  strategy: MergeStrategy;
+  mergedAt?: string | null;
+}
+
 export interface ConfigChange {
   key: string;
   currentValue?: string | null;
