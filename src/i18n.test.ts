@@ -6,6 +6,8 @@ describe("Japanese UI copy", () => {
     expect(uiCopy.ja.addRepository).toBe("リポジトリを追加");
     expect(uiCopy.ja.repositoryAdded("sample")).toContain("sampleを追加しました");
     expect(uiCopy.ja.syncButton).toBe("リポジトリを同期");
+    expect(uiCopy.ja.managePullRequestsButton).toBe("PRを確認・merge");
+    expect(uiCopy.ja.ciPassed(2)).toContain("2件");
     expect(uiCopy.ja.pullBlockedByChanges(2)).toContain("2件");
   });
 

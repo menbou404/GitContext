@@ -15,6 +15,8 @@ import {
   inspectGithubProfile,
   listenForGithubAuthPrompt,
   listGithubRepositories,
+  listPullRequests,
+  mergePullRequest,
   openGithubAuthPage,
   previewAssignment,
   previewCommit,
@@ -43,7 +45,7 @@ import {
   TerminalIcon,
   TrashIcon,
 } from "./Icons";
-import type { AppData, ApplyPreview, BootstrapResult, CloneOptions, CommitPreview, GhProfileStatus, GithubAuthPrompt, GithubRepository, Profile, PublishOptions, PullRequestPreview, PullRequestResult, PushPreview, RepositoryRecord, RepositoryVisibility, SyncPreview } from "./types";
+import type { AppData, ApplyPreview, BootstrapResult, CloneOptions, CommitPreview, GhProfileStatus, GithubAuthPrompt, GithubRepository, ManagedPullRequest, MergePullRequestResult, MergeStrategy, Profile, PublishOptions, PullRequestManagement, PullRequestPreview, PullRequestResult, PushPreview, RepositoryRecord, RepositoryVisibility, SyncPreview } from "./types";
 import { compactPath, initials, profileIsComplete } from "./types";
 import { localizeRuntimeMessage, uiCopy, type Locale } from "./i18n";
 import "./App.css";
@@ -1082,6 +1084,184 @@ function CloneDialog({
   );
 }
 
+const pullRequestBlockReason = (pullRequest: ManagedPullRequest, copy: (typeof uiCopy)[Locale]) => {
+  if (pullRequest.isDraft) return copy.draftCannotMerge;
+  if (pullRequest.reviewDecision === "CHANGES_REQUESTED") return copy.changesRequestedCannotMerge;
+  if (pullRequest.checks.some((check) => check.bucket === "fail" || check.bucket === "cancel")) return copy.ciFailedCannotMerge;
+  if (pullRequest.checks.some((check) => check.bucket === "pending")) return copy.ciPendingCannotMerge;
+  if (pullRequest.mergeable === "CONFLICTING") return copy.conflictCannotMerge;
+  if (pullRequest.mergeable !== "MERGEABLE" || pullRequest.mergeStateStatus !== "CLEAN") return copy.policyCannotMerge;
+  return null;
+};
+
+function PullRequestManagementDialog({
+  management,
+  locale,
+  onClose,
+  onRefresh,
+  onMerge,
+}: {
+  management: PullRequestManagement;
+  locale: Locale;
+  onClose: () => void;
+  onRefresh: () => Promise<PullRequestManagement>;
+  onMerge: (pullRequest: ManagedPullRequest, strategy: MergeStrategy) => Promise<MergePullRequestResult>;
+}) {
+  const copy = uiCopy[locale];
+  const [selectedNumber, setSelectedNumber] = useState<number | null>(management.pullRequests[0]?.number ?? null);
+  const [strategy, setStrategy] = useState<MergeStrategy>("squash");
+  const [confirmed, setConfirmed] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [merging, setMerging] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<MergePullRequestResult | null>(null);
+
+  const selected = management.pullRequests.find((item) => item.number === selectedNumber) ?? management.pullRequests[0] ?? null;
+  const blockedBy = selected ? pullRequestBlockReason(selected, copy) : null;
+
+  useEffect(() => {
+    if (selectedNumber !== null && !management.pullRequests.some((item) => item.number === selectedNumber)) {
+      setSelectedNumber(management.pullRequests[0]?.number ?? null);
+      setConfirmed(false);
+    }
+  }, [management.pullRequests, selectedNumber]);
+
+  const refresh = async () => {
+    setRefreshing(true);
+    setError(null);
+    try {
+      await onRefresh();
+    } catch (nextError) {
+      setError(messageFrom(nextError, locale));
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const merge = async () => {
+    if (!selected || blockedBy || !confirmed) return;
+    setMerging(true);
+    setError(null);
+    try {
+      setResult(await onMerge(selected, strategy));
+    } catch (nextError) {
+      setError(messageFrom(nextError, locale));
+      setConfirmed(false);
+    } finally {
+      setMerging(false);
+    }
+  };
+
+  const checkLabel = (bucket: ManagedPullRequest["checks"][number]["bucket"]) => ({
+    pass: copy.checkPassed,
+    pending: copy.checkPending,
+    fail: copy.checkFailed,
+    skipping: copy.checkSkipped,
+    cancel: copy.checkCancelled,
+  })[bucket];
+
+  return (
+    <div className="modal-layer" onMouseDown={onClose}>
+      <section className="modal pr-management-modal" role="dialog" aria-modal="true" aria-labelledby="pr-management-title" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="modal-header">
+          <div><p className="eyebrow">GitHub</p><h2 id="pr-management-title">{copy.prManagementTitle}</h2></div>
+          <button className="icon-button" onClick={onClose} aria-label={copy.close}><CloseIcon /></button>
+        </div>
+        <p className="modal-lead">{copy.prManagementLead}</p>
+
+        {result ? (
+          <div className="pull-request-result">
+            <span className="result-icon"><CheckIcon /></span>
+            <h3>{copy.mergedPullRequest(result.number)}</h3>
+            <p>{result.title}</p>
+            <code>{result.url}</code>
+            <div className="modal-actions">
+              <button className="button" type="button" onClick={onClose}>{copy.close}</button>
+              <a className="button button--primary" href={result.url} target="_blank" rel="noreferrer">{copy.viewOnGithub}</a>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="pr-management-toolbar">
+              <div><strong>{management.repositoryNameWithOwner}</strong><span>{copy.openPullRequests(management.pullRequests.length)}</span></div>
+              <button className="button button--ghost" type="button" disabled={refreshing || merging} onClick={refresh}>{refreshing ? copy.refreshingPullRequests : copy.refreshPullRequests}</button>
+            </div>
+
+            {!management.pullRequests.length ? (
+              <div className="pr-empty"><CheckIcon /><strong>{copy.noOpenPullRequests}</strong></div>
+            ) : (
+              <div className="pr-management-layout">
+                <div className="pr-list">
+                  {management.pullRequests.map((pullRequest) => {
+                    const failed = pullRequest.checks.filter((check) => check.bucket === "fail" || check.bucket === "cancel").length;
+                    const pending = pullRequest.checks.filter((check) => check.bucket === "pending").length;
+                    const passed = pullRequest.checks.filter((check) => check.bucket === "pass" || check.bucket === "skipping").length;
+                    return (
+                      <button
+                        type="button"
+                        className={`pr-list-item ${selected?.number === pullRequest.number ? "selected" : ""}`}
+                        aria-pressed={selected?.number === pullRequest.number}
+                        key={pullRequest.number}
+                        onClick={() => { setSelectedNumber(pullRequest.number); setConfirmed(false); setError(null); }}
+                      >
+                        <span className="pr-list-number">#{pullRequest.number}{pullRequest.isDraft && <em>{copy.draftBadge}</em>}</span>
+                        <strong>{pullRequest.title}</strong>
+                        <small>{pullRequest.headBranch} → {pullRequest.baseBranch}</small>
+                        <span className={`pr-ci-summary ${failed ? "failed" : pending ? "pending" : "passed"}`}>
+                          {failed ? copy.ciFailed(failed) : pending ? copy.ciPending(pending) : pullRequest.checks.length ? copy.ciPassed(passed) : copy.ciNotConfigured}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {selected ? (
+                  <div className="pr-detail">
+                    <div className="pr-detail-heading">
+                      <div><span>{copy.pullRequestNumber(selected.number)}</span><h3>{selected.title}</h3></div>
+                      <a href={selected.url} target="_blank" rel="noreferrer">{copy.viewOnGithub}</a>
+                    </div>
+                    <p className="pr-route"><code>{selected.headBranch}</code><span>→</span><code>{selected.baseBranch}</code></p>
+                    <div className="pr-detail-meta">
+                      <span>{selected.author ? copy.pullRequestAuthor(selected.author) : "GitHub"}</span>
+                      <span>{selected.reviewDecision === "APPROVED" ? copy.reviewApproved : selected.reviewDecision === "CHANGES_REQUESTED" ? copy.reviewChangesRequested : copy.reviewNotRequired}</span>
+                    </div>
+
+                    <h4>{copy.checksHeading}</h4>
+                    {selected.checks.length ? (
+                      <div className="pr-checks">
+                        {selected.checks.map((check, index) => (
+                          <div className={`pr-check is-${check.bucket}`} key={`${check.name}-${index}`}>
+                            <span>{check.bucket === "pass" || check.bucket === "skipping" ? <CheckIcon /> : <AlertIcon />}</span>
+                            <div><strong>{check.name}</strong><small>{check.workflow || check.state}</small></div>
+                            {check.link ? <a href={check.link} target="_blank" rel="noreferrer">{checkLabel(check.bucket)}</a> : <em>{checkLabel(check.bucket)}</em>}
+                          </div>
+                        ))}
+                      </div>
+                    ) : <div className="pr-no-checks">{copy.ciNotConfigured}</div>}
+
+                    <div className={`merge-assessment ${blockedBy ? "blocked" : "ready"}`}>
+                      {blockedBy ? <AlertIcon /> : <CheckIcon />}
+                      <div><strong>{blockedBy || copy.readyToMerge}</strong>{!blockedBy && <span>{copy.readyToMergeLead}</span>}</div>
+                    </div>
+
+                    <div className="pr-merge-controls">
+                      <label className="field"><span>{copy.mergeStrategy}</span><select value={strategy} onChange={(event) => { setStrategy(event.currentTarget.value as MergeStrategy); setConfirmed(false); }}><option value="squash">{copy.strategySquash}</option><option value="merge">{copy.strategyMerge}</option><option value="rebase">{copy.strategyRebase}</option></select></label>
+                      <label className="draft-option merge-confirm"><input type="checkbox" checked={confirmed} disabled={Boolean(blockedBy) || merging} onChange={(event) => setConfirmed(event.currentTarget.checked)} />{copy.mergeConfirmation(selected.number)}</label>
+                      <button className="button button--danger button--wide" type="button" disabled={Boolean(blockedBy) || !confirmed || merging} onClick={merge}>{merging ? copy.mergingPullRequest : copy.mergePullRequest}</button>
+                    </div>
+                  </div>
+                ) : <div className="pr-empty">{copy.selectPullRequest}</div>}
+              </div>
+            )}
+            {error && <div className="inline-error"><AlertIcon />{error}</div>}
+          </>
+        )}
+      </section>
+    </div>
+  );
+}
+
 function App({ locale = "en" }: { locale?: Locale }) {
   const copy = uiCopy[locale];
   const [result, setResult] = useState<BootstrapResult | null>(null);
@@ -1099,6 +1279,7 @@ function App({ locale = "en" }: { locale?: Locale }) {
   const [syncPreview, setSyncPreview] = useState<SyncPreview | null>(null);
   const [commitPreview, setCommitPreview] = useState<CommitPreview | null>(null);
   const [pullRequestPreview, setPullRequestPreview] = useState<PullRequestPreview | null>(null);
+  const [pullRequestManagement, setPullRequestManagement] = useState<PullRequestManagement | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -1353,6 +1534,39 @@ function App({ locale = "en" }: { locale?: Locale }) {
     return created;
   };
 
+  const reviewPullRequests = async () => {
+    if (!selectedRepository || !assignedProfile) return;
+    setNotice(null);
+    setBusy(true);
+    try {
+      setPullRequestManagement(await listPullRequests(selectedRepository.id, assignedProfile.id));
+    } catch (error) {
+      setNotice(messageFrom(error, locale));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const refreshPullRequests = async () => {
+    if (!pullRequestManagement) throw new Error(copy.somethingWentWrong);
+    const refreshed = await listPullRequests(pullRequestManagement.repository.id, pullRequestManagement.profile.id);
+    setPullRequestManagement(refreshed);
+    return refreshed;
+  };
+
+  const mergePullRequestAction = async (pullRequest: ManagedPullRequest, strategy: MergeStrategy) => {
+    if (!pullRequestManagement) throw new Error(copy.somethingWentWrong);
+    const merged = await mergePullRequest({
+      repositoryId: pullRequestManagement.repository.id,
+      profileId: pullRequestManagement.profile.id,
+      number: pullRequest.number,
+      strategy,
+      expectedHeadOid: pullRequest.headOid,
+    });
+    setNotice(copy.mergedPullRequest(merged.number));
+    return merged;
+  };
+
   const removeSelected = async () => {
     if (!selectedRepository || !window.confirm(copy.removeConfirm(selectedRepository.name))) return;
     try {
@@ -1536,6 +1750,7 @@ function App({ locale = "en" }: { locale?: Locale }) {
                     <button className="button button--sync button--wide" disabled={!assignedProfile || !selectedRepository.lastAppliedAt || busy} onClick={reviewSync}><BranchIcon />{copy.syncButton}</button>
                     <button className="button button--commit button--wide" disabled={!assignedProfile || !selectedRepository.lastAppliedAt || busy} onClick={reviewCommit}><CheckIcon />{copy.commitButton}</button>
                     <button className="button button--pr button--wide" disabled={!assignedProfile?.githubUsername || !assignedProfile.ghConfigDir || !selectedRepository.lastAppliedAt || busy} onClick={reviewPullRequest}><BranchIcon />{copy.pullRequestButton}</button>
+                    <button className="button button--pr-manage button--wide" disabled={!assignedProfile?.githubUsername || !assignedProfile.ghConfigDir || !selectedRepository.lastAppliedAt || busy} onClick={reviewPullRequests}><ShieldIcon />{copy.managePullRequestsButton}</button>
                     <button className="button button--push button--wide" disabled={!assignedProfile || !selectedRepository.lastAppliedAt || busy} onClick={reviewPush}><BranchIcon />{copy.pushButton}</button>
                   </>
                 ) : (
@@ -1559,6 +1774,7 @@ function App({ locale = "en" }: { locale?: Locale }) {
       {syncPreview && <SyncDialog preview={syncPreview} locale={locale} onClose={() => setSyncPreview(null)} onRefresh={refreshSync} onPull={pullSync} onPush={pushSync} />}
       {commitPreview && <CommitDialog preview={commitPreview} locale={locale} onClose={() => setCommitPreview(null)} onCommit={commitRepositoryAction} />}
       {pullRequestPreview && <PullRequestDialog preview={pullRequestPreview} locale={locale} onClose={() => setPullRequestPreview(null)} onRefresh={refreshPullRequest} onCreate={createPullRequestAction} />}
+      {pullRequestManagement && <PullRequestManagementDialog management={pullRequestManagement} locale={locale} onClose={() => setPullRequestManagement(null)} onRefresh={refreshPullRequests} onMerge={mergePullRequestAction} />}
     </div>
   );
 }

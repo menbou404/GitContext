@@ -230,6 +230,54 @@ pub struct PullRequestResult {
     pub existing: bool,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestCheck {
+    pub name: String,
+    pub state: String,
+    pub bucket: String,
+    pub link: Option<String>,
+    pub workflow: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManagedPullRequest {
+    pub number: u64,
+    pub url: String,
+    pub title: String,
+    pub state: String,
+    pub is_draft: bool,
+    pub base_branch: String,
+    pub head_branch: String,
+    pub head_oid: String,
+    pub mergeable: String,
+    pub merge_state_status: String,
+    pub review_decision: String,
+    pub author: Option<String>,
+    pub updated_at: String,
+    pub checks: Vec<PullRequestCheck>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PullRequestManagement {
+    pub repository: RepositoryRecord,
+    pub profile: Profile,
+    pub repository_name_with_owner: String,
+    pub pull_requests: Vec<ManagedPullRequest>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MergePullRequestResult {
+    pub number: u64,
+    pub url: String,
+    pub title: String,
+    pub strategy: String,
+    pub merged_at: Option<String>,
+}
+
 pub fn clean_optional(value: Option<String>) -> Option<String> {
     value.and_then(|item| {
         let trimmed = item.trim().to_string();

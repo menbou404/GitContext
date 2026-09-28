@@ -24,6 +24,7 @@ GitContextは、複数のGitHub作業Identityをリポジトリ単位で割り�
 - commitのみ、またはcommit後の通常pushを1回の画面から実行
 - 適用済みProfileのSSH鍵で現在ブランチを通常push
 - 既定ブランチから作業ブランチを作成し、commit・push・Pull Request作成までを案内
+- 開いているPull RequestとCI結果を一覧確認し、安全条件を満たすPRをSquash／Merge commit／Rebaseでmerge
 - ProfileのSSH鍵でFetchし、ahead/behind確認、安全なFast-forward Pull、Pushを実行
 - 日本語・英語UI
 
@@ -51,6 +52,7 @@ GitContextは認証tokenやSSH秘密鍵の内容を保存しません。GitHub C
 8. commit済みの変更だけを送る場合は、送信先とブランチを確認して通常push
 9. 「PRを作成」から作業ブランチ名、commit、PRタイトルと説明を確認してPull Requestを作成
 10. 「リポジトリを同期」からFetch後のahead/behindを確認し、安全にPullまたはPush
+11. 「PRを確認・merge」からCI・競合・レビュー状態を確認し、merge方法を選んで実行
 
 ## 安全境界
 
@@ -64,6 +66,8 @@ GitContextは認証tokenやSSH秘密鍵の内容を保存しません。GitHub C
 - commit前に現在ブランチ、Profile、対象ファイルを表示し、コミットメッセージは1行200文字以内に制限する
 - 通常pushはGitHub SSH origin、適用済みProfile、現在ブランチを再検証し、force pushを提供しない
 - PR作成はProfile専用のGitHub CLI認証を使い、既存PRの重複作成を避け、途中失敗後に再開できる
+- PRのmerge直前に最新状態と先頭commitを再確認し、Draft、CI未完了・失敗、競合、変更要求、ブランチルールによる停止時は拒否する
+- mergeでは管理者権限による強制、force、作業ブランチの自動削除を提供しない
 - Pullは作業ツリーがクリーンかつFast-forward可能な場合だけ実行し、自動merge/rebaseは行わない
 - 複数Git設定の途中失敗時は元の値へロールバックする
 
