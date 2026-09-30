@@ -274,8 +274,8 @@ args = ["--max-tier", "remote"]
 - **対象クライアント:** 特定のクライアントに依存せず、Claude Code、Codex CLI、Claude Desktop、Codex Desktopを想定する。
 - **GUIでの承認:** 行わない。MCPサーバー単体で動作させ、人の確認はelicitationで行う。
 - **`previewId`の保存先:** サーバープロセスのメモリとする。
+- **`remote`の範囲:** push、PR作成、merge、clone、GitHub公開をすべて提供する。ただし`--max-tier remote`を明示して起動した場合だけ公開する。
 
 ## 未決事項
 
-- **`remote`の範囲:** push、PR作成、mergeまでMCPで提供するか。現時点では提供する案とし、`--max-tier remote`を明示した場合だけ公開する。
 - **elicitationの対応状況:** 各クライアントの対応状況を段階4の前に確認し、READMEに記載する。
