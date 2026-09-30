@@ -2,7 +2,7 @@
 
 ## 目的
 
-Claude CodeなどのAIエージェントが、GitContextに登録したRepository Identity / Profileを通してGit・GitHubを操作できるようにする。
+Claude Code、Codex、Claude Desktop、Codex DesktopなどのAIエージェントが、GitContextに登録したRepository Identity / Profileを通してGit・GitHubを操作できるようにする。
 
 AIエージェントは通常、グローバルなGit author、既定のSSH鍵、グローバルな`gh`認証をそのまま使う。複数のGitHubアカウントを使い分ける環境では、別アカウントでのcommitやpushが起きやすい。GitContextのMCPサーバーは「リポジトリに割り当てたProfile以外では操作できない」経路をAIへ提供し、アカウント分離をAI操作にも適用する。
 
@@ -11,6 +11,8 @@ AIエージェントは通常、グローバルなGit author、既定のSSH鍵�
 - GUI版の安全境界（[MVP_DESIGN.md](MVP_DESIGN.md)）をMCP経由でも維持する。MCPは新しい権限を増やすのではなく、既存の検証済み操作を別の入口から呼べるようにするだけとする。
 - GUIでは「プレビューを人が確認してから実行する」ことで安全性を保っている。MCPでは人が画面を見ない可能性があるため、確認の代わりになる仕組みを設計に組み込む。
 - 対象OSはGUI版と同じくWindowsとする。
+- 特定のクライアントに依存しない。ローカルのstdio接続に対応したMCPクライアント（Claude Code、Codex CLI、Claude Desktop、Codex Desktopなど）であれば同じサーバーを使える。
+- GUIの起動を前提にしない。MCPサーバー単体で動作し、安全性もサーバー側の仕組み（Tierの制限、プレビューID、確認要求）で保つ。
 
 ## 非目標
 
@@ -132,16 +134,46 @@ GUIでは人がプレビューを見てから実行するが、MCPではAIがプ
 3. 実行ツールは指紋を取り直し、保存したものと完全に一致する場合だけ実行する。一致しなければ「状態が変わりました。プレビューからやり直してください」と返す。
 4. `previewId`は1回だけ使え、10分で失効する。サーバーを再起動すると、すべて無効になる。
 
+### 保存先をメモリにする理由
+
+stdio接続のMCPサーバーは、クライアントごとに別プロセスとして起動する。Claude CodeとCodexを同時に使えば、サーバーも2つ動く。
+
+- `previewId`と指紋はサーバープロセスのメモリだけに置き、ファイルには書かない。
+- 他のプロセスからは見えないため、別のクライアントが発行したIDを使い回したり、ファイルから盗み見たりできない。
+- サーバーの終了とともに消えるため、古いIDが残らない。
+- 再起動でIDが無効になった場合は、プレビューを取り直せばよい。
+
 特にcommitは、GUIでは`git add --all`で全変更を対象にしている。MCPでは、プレビュー後にAIが作ったファイル（`.env`など）が紛れ込むのを防ぐため、プレビュー時のファイル一覧と完全に一致する場合だけcommitする。
 
 既存のmergeの`expected_head_oid`／`--match-head-commit`は、この仕組みの特殊な場合にあたる。
 
 ## 人の確認
 
+GUIでの承認は行わない。MCPサーバー単体で使う人がいるため、確認はMCPの仕組みの中で完結させる。
+
+### サーバーからの確認要求（elicitation）
+
+MCPのelicitationを使い、`remote`の実行前にサーバーからクライアントへ確認を依頼する。クライアントは画面で人に確認し、その結果をサーバーへ返す。
+
+- 確認の文面には、操作の種類、Profile、GitHubユーザー名、リポジトリ、ブランチ、対象（commit ID、PR番号、merge方法など）を表示する。
+- 人が承認した場合だけ実行する。拒否やキャンセルの場合は、何もせずに「ユーザーが拒否しました」と返す。
+- AIが確認を代わりに承認できないよう、確認の結果はツールの引数ではなく、elicitationの応答だけで受け取る。
+
+### elicitationに対応していないクライアント
+
+クライアントによって、elicitationに対応しているかどうかは異なる。
+
+| 起動オプション | elicitation非対応クライアントでの`remote`の扱い |
+|---|---|
+| なし（既定） | クライアント自身のツール実行確認に任せて実行する |
+| `--require-confirmation` | 実行を拒否し、elicitation対応クライアントを使うよう案内する |
+
+どちらの場合もプレビューIDの照合は必ず行う。
+
+### その他
+
 - ツールにはMCPのannotationsを付ける。`read`は`readOnlyHint: true`、`remote`は`destructiveHint: true`と`openWorldHint: true`とする。
-- Claude Codeなどのクライアントは、ツールの呼び出しごとに確認を出せる。`remote`のツールは確認を出す設定を推奨し、READMEに設定例を載せる。
 - 実行ツールの結果には、実行したこと（Profile、ブランチ、commit ID、PR URLなど）を必ず含める。
-- 将来の拡張として、`remote`の実行時にGUI側で承認ダイアログを出す方式を検討する（未決事項を参照）。
 
 ## プロンプトインジェクションと入力検証
 
@@ -166,17 +198,44 @@ MCPから実行した`local`と`remote`の操作を、状態ディレクトリ�
 
 ## クライアントの設定
 
+どのクライアントでも、実行ファイルのパスと起動オプションを登録するだけで使える。`--max-tier`を省略した場合は`read`だけが公開される。以下の例のパスは、インストール先に合わせて読み替える。
+
 ### Claude Code
 
 ```powershell
 claude mcp add gitcontext -- "C:\Program Files\GitContext\gitcontext-mcp.exe" --max-tier remote
 ```
 
-`remote`のツールには、Claude Codeの権限設定で確認を出すルールを推奨する。
+### Claude Desktop
 
-### Codex
+`%APPDATA%\Claude\claude_desktop_config.json`に追加する。
 
-CodexのMCPサーバーはサンドボックスの外で動くため、`remote`を公開するとCodexがpushやmergeを実行できてしまう。[CONTRIBUTING.md](../CONTRIBUTING.md)の役割分担に合わせ、Codexには`--max-tier read`だけを設定する。
+```json
+{
+  "mcpServers": {
+    "gitcontext": {
+      "command": "C:\\Program Files\\GitContext\\gitcontext-mcp.exe",
+      "args": ["--max-tier", "remote"]
+    }
+  }
+}
+```
+
+### Codex CLI / Codex Desktop
+
+どちらも`~/.codex/config.toml`の設定を使う。
+
+```toml
+[mcp_servers.gitcontext]
+command = 'C:\Program Files\GitContext\gitcontext-mcp.exe'
+args = ["--max-tier", "remote"]
+```
+
+### Tierの選び方
+
+- まずは既定の`read`で使い始め、必要になったら`local`、`remote`へ広げることを推奨する。
+- CodexのMCPサーバーはCodexのサンドボックスの外で動く。サンドボックスでGit操作を制限していても、`remote`を公開すればMCP経由でpushやmergeができる点に注意する。
+- GitContext自体の開発では、[CONTRIBUTING.md](../CONTRIBUTING.md)の役割分担に合わせて、Codexには`read`だけを設定する。
 
 ## 配布
 
@@ -195,22 +254,28 @@ CodexのMCPサーバーはサンドボックスの外で動くため、`remote`�
   - プレビュー後にファイルが増えた場合
 - ロックについては、GUIとMCPの同時書き込みを模したテストで、更新が失われないことを確認する。
 - `--max-tier`より上のツールが、一覧に出ず、呼び出しも拒否されることを確認する。
+- elicitationについては、承認・拒否・キャンセル・非対応クライアント（`--require-confirmation`の有無）の各場合をテストする。
+- 実際のクライアント（Claude Code、Codex CLI、Claude Desktop、Codex Desktop）で、接続とツール一覧の取得を手動で確認する。
 
 ## 段階的な実装計画
 
 | 段階 | 内容 | 完了条件 |
 |---|---|---|
 | 1 | `gitcontext-core`の切り出し、保存先の解決、プロセス間ロック | 動作を変えずに既存テストが通る。GUIの挙動が変わらない |
-| 2 | `gitcontext-mcp`の`read`ツール | Claude Codeから状態とプレビューを取得できる |
+| 2 | `gitcontext-mcp`の`read`ツール | 4つのクライアントから状態とプレビューを取得できる |
 | 3 | プレビューID、監査ログ、`local`ツール | 拒否ケースのテストが通る |
-| 4 | `remote`ツール | GUIと同じ検証を通り、Codex向けの`read`制限が効く |
-| 5 | インストーラーへの同梱、GUIの設定画面、README | 配布物から設定できる |
+| 4 | elicitationによる確認と`remote`ツール | GUIと同じ検証を通り、確認の各ケースのテストが通る |
+| 5 | インストーラーへの同梱、GUIの設定画面、README（クライアント別の設定例） | 配布物から設定できる |
 
 各段階を1つのPRとする。
 
+## 決定事項
+
+- **対象クライアント:** 特定のクライアントに依存せず、Claude Code、Codex CLI、Claude Desktop、Codex Desktopを想定する。
+- **GUIでの承認:** 行わない。MCPサーバー単体で動作させ、人の確認はelicitationで行う。
+- **`previewId`の保存先:** サーバープロセスのメモリとする。
+
 ## 未決事項
 
-- **対象クライアント:** 現時点ではClaude Codeを主な対象とし、Codexは`read`だけとする案で進める。Claude Desktopへの対応が必要か確認する。
-- **`remote`の範囲:** push、PR作成、mergeまでMCPで提供するか。提供しない場合は段階4を省く。
-- **GUIでの承認:** `remote`の実行時にGUIで承認させるか。GUIの起動が前提になる代わりに、クライアントの設定に頼らずに人の確認を保証できる。
-- **`previewId`の保存:** 保存先をサーバープロセスのメモリにするか。サーバーを再起動すると失効するが、ファイルに保存するより漏れや再利用のリスクが小さい。
+- **`remote`の範囲:** push、PR作成、mergeまでMCPで提供するか。現時点では提供する案とし、`--max-tier remote`を明示した場合だけ公開する。
+- **elicitationの対応状況:** 各クライアントの対応状況を段階4の前に確認し、READMEに記載する。
