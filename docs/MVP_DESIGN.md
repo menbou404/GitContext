@@ -165,3 +165,4 @@ GitHub CLIが発行したワンタイムコードはTauri eventで認証中の�
 - リポジトリrootの一括scan
 - remote ownerの自動検出とProfileのGitHub usernameとの照合
 - Profile export/import（参照情報のみ）
+- AIエージェント向けMCPサーバー（[MCP_DESIGN.md](MCP_DESIGN.md)）
