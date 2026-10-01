@@ -7,7 +7,7 @@ IssueやPull Requestを歓迎します。大きな変更は実装前にIssueで�
 ```powershell
 npm ci
 npm test
-cargo test --manifest-path src-tauri\Cargo.toml
+cargo test --manifest-path src-tauri\Cargo.toml --workspace
 npm run tauri dev
 ```
 
@@ -40,8 +40,8 @@ Codexの`workspace-write`サンドボックスでは`.git`が読み取り専用�
 
 - `npm test`が成功する
 - `npm run build`が成功する
-- `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check`が成功する
-- `cargo test --manifest-path src-tauri/Cargo.toml`が成功する
+- `cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check`が成功する
+- `cargo test --manifest-path src-tauri/Cargo.toml --workspace`が成功する
 - token、秘密鍵、個人情報をコミットしていない
 - ユーザー向け変更を`CHANGELOG.md`へ記載した
 

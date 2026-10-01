@@ -88,7 +88,7 @@ GitContextは認証tokenやSSH秘密鍵の内容を保存しません。GitHub C
 ```powershell
 npm ci
 npm test
-cargo test --manifest-path src-tauri\Cargo.toml
+cargo test --manifest-path src-tauri\Cargo.toml --workspace
 npm run tauri dev
 ```
 

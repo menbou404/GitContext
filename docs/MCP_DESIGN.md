@@ -24,14 +24,17 @@ AIエージェントは通常、グローバルなGit author、既定のSSH鍵�
 ## 全体構成
 
 ```text
-src-tauri/                     (workspace)
-├─ core/   gitcontext-core     … Tauri非依存の業務ロジック・検証・状態保存
-├─ app/    git-context (Tauri) … GUI。coreを呼ぶ薄いcommand層
-└─ mcp/    gitcontext-mcp      … MCPサーバー（stdio）。coreを呼ぶ
+src-tauri/                          (workspace root + Tauri app package)
+├─ src/                             git-context (Tauri) … GUI。coreを呼ぶ薄いcommand層
+└─ crates/
+   ├─ gitcontext-core/              … Tauri非依存の業務ロジック・検証・状態保存
+   └─ gitcontext-mcp/               … MCPサーバー（stdio）。coreを呼ぶ（段階2で追加）
 ```
 
-- 現在の[commands.rs](../src-tauri/src/commands.rs)には、検証・状態更新・Git/gh呼び出しとTauri固有処理（`AppHandle`、`State`、event送信、`spawn_blocking`）が混在している。業務ロジックを`gitcontext-core`へ移し、Tauri commandとMCP toolはどちらもcoreの同じ関数を呼ぶ。
-- [git_ops.rs](../src-tauri/src/git_ops.rs)と[models.rs](../src-tauri/src/models.rs)はTauriに依存していないため、そのままcoreへ移す。
+- Tauri CLIは`src-tauri/`直下にアプリがある構成を前提にしているため、GUIは移動せず、`src-tauri/Cargo.toml`をworkspaceのルートにする。
+- Tauri commandには、検証・状態更新・Git/gh呼び出しとTauri固有処理（`AppHandle`、`State`、event送信、`spawn_blocking`）が混在していた。業務ロジックを`gitcontext-core`へ移し、Tauri commandとMCP toolはどちらもcoreの同じ関数を呼ぶ。
+- `git_ops`と`models`はTauriに依存していないため、そのままcoreへ移す。
+- workspaceのテストと整形は`cargo test --workspace`、`cargo fmt --all`で行う。
 - MCPサーバーは公式Rust SDK `rmcp`（`server`、`transport-io`、`macros`）で実装する。
 - GUIとMCPサーバーは別プロセスとして動き、同じ`state.json`を共有する。
 
@@ -39,16 +42,15 @@ src-tauri/                     (workspace)
 
 ### 保存先の解決
 
-[storage.rs](../src-tauri/src/storage.rs)は現在`AppHandle`から`app_config_dir()`を得ている。coreでは`AppHandle`に依存せず、次の順で解決する。
+coreの`StateStore`は状態ディレクトリを引数で受け取り、`AppHandle`に依存しない。
 
-1. 呼び出し側が明示したディレクトリ（テスト用）
-2. `%APPDATA%\app.gitcontext.desktop`（Tauriの`identifier`と同じ場所）
-
-GUIとMCPサーバーが同じ場所を指すことをテストで確認する。
+- GUIは従来どおりTauriの`app_config_dir()`から`StateStore`を作る。
+- MCPサーバーは`default_config_dir()`で同じ場所（Windowsでは`%APPDATA%\app.gitcontext.desktop`、Tauriの`identifier`と同じ）を解決する。
+- テストでは一時ディレクトリを渡す。
 
 ### プロセス間の排他
 
-現在の`AppGate`（`Mutex`）は同一プロセス内でしか効かない。GUIとMCPサーバーが同時に書き込むと更新が失われるため、状態ディレクトリに`state.lock`を置き、読み込みから保存までをOSのファイルロックで保護する。
+従来の`AppGate`（`Mutex`）は同一プロセス内でしか効かない。GUIとMCPサーバーが同時に書き込むと更新が失われるため、状態ディレクトリに`state.lock`を置き、読み込みから保存までをOSのファイルロックで保護する。
 
 - ロックは標準ライブラリの`File::lock`（Rust 1.89以降）を使う。
 - ロック取得は最大数秒で打ち切り、「GitContextの別の操作が実行中です」と返す。
