@@ -74,6 +74,7 @@ pub struct BootstrapResult {
     pub environment: EnvironmentStatus,
     pub storage_path: Option<String>,
     pub demo_mode: bool,
+    pub development_data: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]

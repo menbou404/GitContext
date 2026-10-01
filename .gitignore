@@ -13,6 +13,12 @@ dist-ssr
 *.local
 /src-tauri/target/
 
+# GitContext app state (contains personal Profiles; never commit)
+state.json
+state.json.*
+state.lock
+state-*.json
+
 # Local environment and signing material
 .env
 .env.*
