@@ -2,6 +2,7 @@ import type { BootstrapResult } from "./types";
 
 export const demoBootstrap: BootstrapResult = {
   demoMode: true,
+  developmentData: false,
   storagePath: "Browser preview — no settings are written",
   environment: {
     git: { available: true, version: "git version 2.53.0.windows.2" },

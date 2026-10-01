@@ -43,6 +43,7 @@ export interface BootstrapResult {
   environment: EnvironmentStatus;
   storagePath?: string | null;
   demoMode: boolean;
+  developmentData?: boolean;
 }
 
 export interface GhProfileStatus {

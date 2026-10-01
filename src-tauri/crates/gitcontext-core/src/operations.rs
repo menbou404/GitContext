@@ -8,7 +8,7 @@ use crate::{
         MergePullRequestResult, Profile, PublishResult, PullRequestManagement, PullRequestPreview,
         PullRequestResult, PushPreview, PushResult, RepositoryRecord, SyncPreview,
     },
-    storage::StateStore,
+    storage::{development_data, StateStore},
 };
 use chrono::Utc;
 use std::{
@@ -27,6 +27,7 @@ pub fn bootstrap(store: &StateStore) -> Result<BootstrapResult, String> {
         environment: environment_status(),
         storage_path: Some(storage_path),
         demo_mode: false,
+        development_data: development_data(),
     })
 }
 

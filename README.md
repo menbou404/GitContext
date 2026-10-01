@@ -92,6 +92,16 @@ cargo test --manifest-path src-tauri\Cargo.toml --workspace
 npm run tauri dev
 ```
 
+### 開発版のデータ
+
+`npm run tauri dev`などのdebugビルドは、インストーラー版（`%APPDATA%\app.gitcontext.desktop`）とは別の`%APPDATA%\app.gitcontext.dev`にProfileなどを保存します。インストーラー版をアンインストールしても、開発版のデータは消えません。環境変数`GITCONTEXT_DATA_DIR`に絶対パスを指定すると、保存先を変更できます。
+
+状態ファイルは保存のたびに、直前の内容を同じフォルダの`backups\state-<日時>.json`へ残します（最新20世代）。誤って変更・削除した場合は、アプリを終了してから目的のバックアップを`state.json`としてコピーしてください。
+
+状態ファイルには個人のProfileが含まれます。リポジトリ内へコピーしたり、commitしたりしないでください。
+
+### ブラウザ用プレビュー
+
 ブラウザ用の操作プレビューは実際のGit設定を書き換えません。
 
 ```powershell

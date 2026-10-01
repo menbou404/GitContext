@@ -1657,6 +1657,7 @@ function App({ locale = "en" }: { locale?: Locale }) {
 
         <main className="content">
           {result.demoMode && <div className="demo-banner"><span>{copy.demoPreview}</span> {copy.demoNotice}</div>}
+          {result.developmentData && <div className="demo-banner"><span>{copy.developmentData}</span> {copy.developmentDataNotice} {result.storagePath}</div>}
           {notice && <div className="notice"><CheckIcon /><span>{notice}</span><button onClick={() => setNotice(null)} aria-label={copy.dismiss}><CloseIcon /></button></div>}
 
           <section className="hero-row">
