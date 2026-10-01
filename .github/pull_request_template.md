@@ -10,8 +10,8 @@
 
 - [ ] `npm test`
 - [ ] `npm run build`
-- [ ] `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check`
-- [ ] `cargo test --manifest-path src-tauri/Cargo.toml`
+- [ ] `cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check`
+- [ ] `cargo test --manifest-path src-tauri/Cargo.toml --workspace`
 - [ ] No token, private key, or personal data was committed
 
 ## Screenshots

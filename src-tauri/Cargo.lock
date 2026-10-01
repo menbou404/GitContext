@@ -1091,12 +1091,19 @@ dependencies = [
 name = "git-context"
 version = "0.1.0-beta.1"
 dependencies = [
- "chrono",
- "serde",
- "serde_json",
+ "gitcontext-core",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
+]
+
+[[package]]
+name = "gitcontext-core"
+version = "0.1.0-beta.1"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
  "uuid",
 ]
 

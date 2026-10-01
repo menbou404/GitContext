@@ -38,7 +38,7 @@ jobs:
         run: npm test
 
       - name: Test Rust backend
-        run: cargo test --manifest-path src-tauri/Cargo.toml
+        run: cargo test --manifest-path src-tauri/Cargo.toml --workspace
 
       - name: Build installers and create draft release
         uses: tauri-apps/tauri-action@action-v1.0.0

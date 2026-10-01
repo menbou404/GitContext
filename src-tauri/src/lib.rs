@@ -1,15 +1,19 @@
 mod commands;
-mod git_ops;
-mod models;
-mod storage;
 
-use std::sync::Mutex;
+use gitcontext_core::storage::StateStore;
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .manage(commands::AppGate(Mutex::new(())))
+        .setup(|app| {
+            let config_dir = app.path().app_config_dir().map_err(|error| {
+                format!("Could not resolve GitContext's settings directory: {error}")
+            })?;
+            app.manage(StateStore::new(config_dir));
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::bootstrap,
             commands::save_profile,
