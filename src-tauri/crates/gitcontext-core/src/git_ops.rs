@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeSet,
     env, fs,
     path::{Path, PathBuf},
     process::{Command, Output},
@@ -15,6 +16,175 @@ pub struct PullRequestSourceState {
     pub changes: Vec<WorkingTreeChange>,
     pub commits_ahead: u64,
     pub branch_pushed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExactChange {
+    pub status: String,
+    pub path: String,
+    pub original_path: Option<String>,
+}
+
+pub fn head_commit(repository_path: &str) -> Result<String, String> {
+    let root = repository_root(repository_path)?;
+    Ok(git_optional(&root, &["rev-parse", "--verify", "HEAD"]).unwrap_or_default())
+}
+
+pub fn reference_commit(repository_path: &str, reference: &str) -> Result<String, String> {
+    let root = repository_root(repository_path)?;
+    Ok(git_optional(&root, &["rev-parse", "--verify", reference]).unwrap_or_default())
+}
+
+pub fn branch_name(repository_path: &str) -> Result<String, String> {
+    current_branch(&repository_root(repository_path)?, "continuing")
+}
+
+pub fn tracking_branch(repository_path: &str) -> Result<Option<String>, String> {
+    let root = repository_root(repository_path)?;
+    Ok(git_optional(
+        &root,
+        &[
+            "rev-parse",
+            "--abbrev-ref",
+            "--symbolic-full-name",
+            "@{upstream}",
+        ],
+    ))
+}
+
+pub fn exact_changes(repository_path: &str) -> Result<Vec<ExactChange>, String> {
+    let root = repository_root(repository_path)?;
+    let output = run_git(
+        &root,
+        &["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+    )?;
+    output_text(&output)?;
+    parse_exact_changes(&output.stdout)
+}
+
+fn parse_exact_changes(bytes: &[u8]) -> Result<Vec<ExactChange>, String> {
+    let mut fields = bytes
+        .split(|byte| *byte == 0)
+        .filter(|field| !field.is_empty());
+    let mut changes = Vec::new();
+    while let Some(field) = fields.next() {
+        if field.len() < 4 || field[2] != b' ' {
+            return Err("Git returned invalid status data.".into());
+        }
+        let status = String::from_utf8_lossy(&field[..2]).trim().to_string();
+        let path = String::from_utf8(field[3..].to_vec())
+            .map_err(|_| "A changed file name is not UTF-8.".to_string())?;
+        let original_path = if field[..2].contains(&b'R') || field[..2].contains(&b'C') {
+            Some(
+                String::from_utf8(
+                    fields
+                        .next()
+                        .ok_or("Git returned an incomplete rename.")?
+                        .to_vec(),
+                )
+                .map_err(|_| "A renamed file name is not UTF-8.".to_string())?,
+            )
+        } else {
+            None
+        };
+        changes.push(ExactChange {
+            status,
+            path,
+            original_path,
+        });
+    }
+    Ok(changes)
+}
+
+fn change_paths(changes: &[ExactChange]) -> BTreeSet<String> {
+    changes
+        .iter()
+        .flat_map(|change| std::iter::once(change.path.clone()).chain(change.original_path.clone()))
+        .collect()
+}
+
+fn cached_paths(root: &Path) -> Result<BTreeSet<String>, String> {
+    let output = run_git(
+        root,
+        &["diff", "--cached", "--no-renames", "--name-only", "-z"],
+    )?;
+    output_text(&output)?;
+    output
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|field| !field.is_empty())
+        .map(|field| {
+            String::from_utf8(field.to_vec())
+                .map_err(|_| "A staged file name is not UTF-8.".to_string())
+        })
+        .collect()
+}
+
+pub fn commit_exact_changes(
+    repository: &RepositoryRecord,
+    profile: &Profile,
+    message: &str,
+    changes: &[ExactChange],
+) -> Result<CommitResult, String> {
+    let message = validate_commit_message(message)?;
+    let root = repository_root(&repository.path)?;
+    validate_applied_identity(&root, profile)?;
+    let branch = current_branch(&root, "committing")?;
+    if changes.is_empty() {
+        return Err("There are no previewed changes to commit.".into());
+    }
+    let paths = change_paths(changes);
+    if !cached_paths(&root)?.is_subset(&paths) {
+        return Err("Staged files differ from the preview. No commit was made.".into());
+    }
+    let index_name = output_text(&run_git(&root, &["rev-parse", "--git-path", "index"])?)?;
+    let index_path = root.join(index_name);
+    let original_index = fs::read(&index_path).ok();
+    let add_paths: Vec<_> = paths
+        .iter()
+        .filter(|path| {
+            root.join(path).exists()
+                || run_git(
+                    &root,
+                    &[
+                        "ls-files",
+                        "--error-unmatch",
+                        "--",
+                        &format!(":(literal){path}"),
+                    ],
+                )
+                .is_ok_and(|output| output.status.success())
+        })
+        .map(|path| format!(":(literal){path}"))
+        .collect();
+    let staged = if add_paths.is_empty() {
+        cached_paths(&root)
+    } else {
+        let output = Command::new("git")
+            .current_dir(&root)
+            .args(["add", "-A", "--"])
+            .args(add_paths)
+            .output()
+            .map_err(|error| format!("Could not start git add: {error}"))?;
+        output_text(&output).and_then(|_| cached_paths(&root))
+    };
+    if !matches!(staged.as_ref(), Ok(staged) if staged == &paths) {
+        match original_index {
+            Some(bytes) => fs::write(&index_path, bytes)
+                .map_err(|_| "Could not restore the Git index after staging failed.".to_string())?,
+            None if index_path.exists() => fs::remove_file(&index_path)
+                .map_err(|_| "Could not restore the Git index after staging failed.".to_string())?,
+            None => {}
+        }
+        return Err("Staged files differ from the preview. No commit was made.".into());
+    }
+    output_text(&run_git(&root, &["commit", "--message", &message])?)?;
+    let commit_id = output_text(&run_git(&root, &["rev-parse", "--short", "HEAD"])?)?;
+    Ok(CommitResult {
+        branch,
+        commit_id,
+        message,
+    })
 }
 
 pub fn inspect_repository(input: &str) -> Result<RepositoryRecord, String> {
@@ -777,9 +947,9 @@ mod tests {
 
     use super::{
         apply_profile, build_commit_preview, build_preview, commit_all_changes,
-        create_working_branch, is_gitcontext_ssh_command, parse_ahead_behind,
-        parse_working_tree_changes, read_local_config, rollback_local_config, run_git,
-        unset_local_config, validate_commit_message, validate_github_ssh_remote,
+        commit_exact_changes, create_working_branch, exact_changes, is_gitcontext_ssh_command,
+        parse_ahead_behind, parse_working_tree_changes, read_local_config, rollback_local_config,
+        run_git, unset_local_config, validate_commit_message, validate_github_ssh_remote,
         write_local_config,
     };
     use crate::models::{ConfigChange, Profile, RepositoryRecord};
@@ -812,6 +982,100 @@ mod tests {
             gh_config_dir: None,
         };
         (root, repository, profile)
+    }
+
+    fn committed_test_repository() -> (PathBuf, RepositoryRecord, Profile) {
+        let (root, repository, profile) = apply_test_repository();
+        apply_profile(&repository, &profile).unwrap();
+        fs::write(root.join("old name.txt"), "initial").unwrap();
+        assert!(run_git(&root, &["add", "--all"]).unwrap().status.success());
+        assert!(run_git(&root, &["commit", "-m", "Initial"])
+            .unwrap()
+            .status
+            .success());
+        (root, repository, profile)
+    }
+
+    #[test]
+    fn fingerprint_git_references_are_read_without_tauri() {
+        let (root, repository, profile) = apply_test_repository();
+        assert!(super::head_commit(&repository.path).unwrap().is_empty());
+        assert!(
+            super::reference_commit(&repository.path, "refs/remotes/origin/main")
+                .unwrap()
+                .is_empty()
+        );
+        assert!(super::tracking_branch(&repository.path).unwrap().is_none());
+        fs::write(root.join("first.txt"), "first").unwrap();
+        assert!(run_git(&root, &["add", "--all"]).unwrap().status.success());
+        apply_profile(&repository, &profile).unwrap();
+        assert!(run_git(&root, &["commit", "-m", "Initial"])
+            .unwrap()
+            .status
+            .success());
+        assert!(!super::head_commit(&repository.path).unwrap().is_empty());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn scoped_commit_excludes_files_created_after_preview() {
+        let (root, repository, profile) = committed_test_repository();
+        fs::write(root.join("first file.txt"), "previewed").unwrap();
+        let changes = exact_changes(&repository.path).unwrap();
+        fs::write(root.join("later.txt"), "later").unwrap();
+        commit_exact_changes(&repository, &profile, "Scoped", &changes).unwrap();
+        let names = super::output_text(
+            &run_git(&root, &["show", "--pretty=format:", "--name-only", "HEAD"]).unwrap(),
+        )
+        .unwrap();
+        assert!(names.contains("first file.txt"));
+        assert!(!names.contains("later.txt"));
+        assert!(root.join("later.txt").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn scoped_commit_handles_both_sides_of_rename() {
+        let (root, repository, profile) = committed_test_repository();
+        assert!(run_git(&root, &["mv", "old name.txt", "new name.txt"])
+            .unwrap()
+            .status
+            .success());
+        let changes = exact_changes(&repository.path).unwrap();
+        assert_eq!(changes[0].path, "new name.txt");
+        assert_eq!(changes[0].original_path.as_deref(), Some("old name.txt"));
+        commit_exact_changes(&repository, &profile, "Rename", &changes).unwrap();
+        let names = super::output_text(
+            &run_git(
+                &root,
+                &["show", "--pretty=format:", "--name-status", "HEAD"],
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(names.contains("old name.txt"));
+        assert!(names.contains("new name.txt"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn scoped_commit_rejects_unrelated_staged_file() {
+        let (root, repository, profile) = committed_test_repository();
+        fs::write(root.join("previewed.txt"), "previewed").unwrap();
+        let changes = exact_changes(&repository.path).unwrap();
+        fs::write(root.join("unrelated.txt"), "unrelated").unwrap();
+        assert!(run_git(&root, &["add", "--", "unrelated.txt"])
+            .unwrap()
+            .status
+            .success());
+        let before = super::head_commit(&repository.path).unwrap();
+        assert!(commit_exact_changes(&repository, &profile, "Should fail", &changes).is_err());
+        assert_eq!(super::head_commit(&repository.path).unwrap(), before);
+        assert_eq!(
+            super::cached_paths(&root).unwrap(),
+            ["unrelated.txt".to_string()].into()
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

@@ -448,6 +448,23 @@ pub fn commit_repository(
     }
 }
 
+pub fn commit_previewed_changes(
+    store: &StateStore,
+    repository_id: String,
+    profile_id: String,
+    message: String,
+    changes: &[git_ops::ExactChange],
+) -> Result<CommitResult, String> {
+    let (repository, profile) = {
+        let _guard = store.lock()?;
+        let data = store.load()?;
+        let (repository, profile) = find_assignment(&data, &repository_id, &profile_id)?;
+        ensure_applied_assignment(repository, profile, &profile_id, "committing")?;
+        (repository.clone(), profile.clone())
+    };
+    git_ops::commit_exact_changes(&repository, &profile, &message, changes)
+}
+
 pub fn preview_pull_request(
     store: &StateStore,
     repository_id: String,

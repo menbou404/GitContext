@@ -105,7 +105,7 @@ npm run tauri dev
 
 ### MCPサーバー（開発中）
 
-AIエージェントからGitContextのProfileとリポジトリを参照するMCPサーバー`gitcontext-mcp`を開発中です。現在は読み取り専用のツールだけを提供します。設計は[docs/MCP_DESIGN.md](docs/MCP_DESIGN.md)を参照してください。
+AIエージェントからGitContextのProfileとリポジトリを扱うMCPサーバー`gitcontext-mcp`を開発中です。既定では読み取り専用のツールだけを公開します。`--max-tier local`を付けて起動すると、プロファイルの適用、ブランチ作成、commit、pullなどのローカルの変更も、プレビューで確認した内容に限って実行できます。AIによる変更の操作は、データフォルダの`mcp-audit.jsonl`に記録されます。設計は[docs/MCP_DESIGN.md](docs/MCP_DESIGN.md)を参照してください。
 
 ```powershell
 cargo build --manifest-path src-tauri\Cargo.toml -p gitcontext-mcp
