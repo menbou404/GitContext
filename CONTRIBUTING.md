@@ -6,10 +6,40 @@ IssueやPull Requestを歓迎します。大きな変更は実装前にIssueで�
 
 ```powershell
 npm ci
+npm run hooks:install
 npm test
 cargo test --manifest-path src-tauri\Cargo.toml --workspace
 npm run tauri dev
 ```
+
+## 個人情報の混入防止
+
+公開リポジトリのため、個人情報や秘密情報がcommit・pushされないよう、ローカルのGit hookとCIで検査します。
+
+### ローカルのGit hook
+
+`npm run hooks:install`で、このリポジトリの`core.hooksPath`を`scripts/git-hooks`に設定します。以後、次のタイミングで`scripts/personal-data-guard.mjs`が実行されます。
+
+| hook | 検査対象 |
+|---|---|
+| `pre-commit` | ステージした変更の追加行、ファイル名、commitの作成者とcommitterのメール |
+| `commit-msg` | commitメッセージ |
+| `pre-push` | pushするcommitの差分、ファイル名、メッセージ、作成者とcommitter |
+
+常に有効な検査:
+
+- 許可されていないメールアドレス（許可するドメインとアドレスは`.personal-data-guard.json`で管理）
+- 状態ファイル（`state.json`など）、秘密鍵、`.env`などの禁止ファイル名
+
+### ローカル専用の禁止語リスト
+
+自分の個人名、私用メールアドレス、Windowsのユーザー名など、リポジトリに含めたくない語は`.git/info/personal-denylist`に1行1語で書きます。このファイルは`.git`の中にあるため、commitもpushもされません。大文字小文字を区別しない部分一致で検査し、一致した語そのものは出力せず、何番目の項目に一致したかだけを表示します。
+
+### CI
+
+`Privacy and secret scan`ジョブで、追跡中のファイルとPull Requestのcommitを同じルールで検査し（禁止語リストは使いません）、[gitleaks](https://github.com/gitleaks/gitleaks)で履歴全体の秘密情報を検査します。外部コントリビューターのcommit作成者のメールは、失敗ではなく警告として扱います。
+
+意図的に例外が必要な場合は、`.personal-data-guard.json`に許可を追加し、理由をPull Requestに書いてください。
 
 ## Workflow
 

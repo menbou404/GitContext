@@ -7,6 +7,8 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "test": "vitest run",
+    "hooks:install": "node scripts/install-git-hooks.mjs",
+    "guard:tree": "node scripts/personal-data-guard.mjs --tree --no-denylist",
     "preview": "vite preview",
     "tauri": "tauri"
   },
