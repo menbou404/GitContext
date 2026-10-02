@@ -1,0 +1,23 @@
+{
+  "allowedEmailDomains": [
+    "example.com",
+    "example.org",
+    "example.net",
+    "example.ac.jp",
+    "*.example",
+    "users.noreply.github.com"
+  ],
+  "allowedEmails": [
+    "git@github.com",
+    "noreply@anthropic.com",
+    "noreply@github.com",
+    "support@github.com"
+  ],
+  "ignoredPaths": [
+    "package-lock.json",
+    "src-tauri/Cargo.lock",
+    "**/*.png",
+    "**/*.ico",
+    "**/*.icns"
+  ]
+}

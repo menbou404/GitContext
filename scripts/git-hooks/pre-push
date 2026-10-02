@@ -1,0 +1,39 @@
+#!/bin/sh
+if ! command -v node >/dev/null 2>&1; then
+  echo "personal-data-guard: node が必要です。" >&2
+  exit 1
+fi
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  case "$local_sha" in
+    *[!0]*) ;;
+    *) continue ;;
+  esac
+
+  case "$remote_sha" in
+    *[!0]*) range="$remote_sha..$local_sha" ;;
+    *)
+      if git rev-parse --verify -q origin/main >/dev/null 2>&1; then
+        range="origin/main..$local_sha"
+      else
+        base=
+        for remote_ref in $(git for-each-ref --format='%(refname)' refs/remotes/origin); do
+          base=$(git merge-base "$local_sha" "$remote_ref" 2>/dev/null) || base=
+          if [ -n "$base" ]; then break; fi
+        done
+        if [ -z "$base" ]; then
+          if [ "$(git rev-list --count "$local_sha")" = "1" ]; then
+            range="$local_sha"
+          else
+            echo "personal-data-guard: 比較元の remote ref が見つかりません。fetch 後に再試行してください。" >&2
+            exit 1
+          fi
+        else
+          range="$base..$local_sha"
+        fi
+      fi
+      ;;
+  esac
+
+  node scripts/personal-data-guard.mjs --range "$range" || exit 1
+done

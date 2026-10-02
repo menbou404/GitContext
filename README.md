@@ -87,10 +87,13 @@ GitContextは認証tokenやSSH秘密鍵の内容を保存しません。GitHub C
 
 ```powershell
 npm ci
+npm run hooks:install
 npm test
 cargo test --manifest-path src-tauri\Cargo.toml --workspace
 npm run tauri dev
 ```
+
+`npm run hooks:install`は、個人情報や秘密情報のcommitを防ぐGit hookを設定します。詳細は[CONTRIBUTING.md](CONTRIBUTING.md)を参照してください。
 
 ### 開発版のデータ
 

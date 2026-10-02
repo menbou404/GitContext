@@ -1,0 +1,6 @@
+#!/bin/sh
+if ! command -v node >/dev/null 2>&1; then
+  echo "personal-data-guard: node が必要です。" >&2
+  exit 1
+fi
+node scripts/personal-data-guard.mjs --message "$1"
