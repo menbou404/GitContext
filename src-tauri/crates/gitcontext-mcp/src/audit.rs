@@ -18,6 +18,7 @@ pub struct Audit<'a> {
     pub outcome: &'a str,
     pub summary: &'a str,
     pub client: Option<&'a str>,
+    pub confirmation: Option<&'a str>,
 }
 
 impl<'a> Audit<'a> {
@@ -28,6 +29,7 @@ impl<'a> Audit<'a> {
         outcome: &'a str,
         summary: &'a str,
         client: Option<&'a str>,
+        confirmation: Option<&'a str>,
     ) -> Self {
         Self {
             at: Utc::now().to_rfc3339(),
@@ -37,6 +39,7 @@ impl<'a> Audit<'a> {
             outcome,
             summary,
             client,
+            confirmation,
         }
     }
 }
@@ -84,6 +87,7 @@ mod tests {
                 Some("profile"),
                 "success",
                 "commit abc",
+                None,
                 None,
             ),
         )

@@ -263,6 +263,42 @@ pub fn clone_repository(
     Ok(CloneResult { data, repository })
 }
 
+pub fn preview_clone_repository(
+    store: &StateStore,
+    profile_id: String,
+    ssh_url: String,
+    destination_parent: String,
+) -> Result<(String, String, String), String> {
+    let (url, repository_name) = validate_github_ssh_url(&ssh_url)?;
+    let data = {
+        let _guard = store.lock()?;
+        store.load()?
+    };
+    let profile = data
+        .profiles
+        .iter()
+        .find(|item| item.id == profile_id)
+        .ok_or_else(|| "Profile was not found.".to_string())?;
+    validate_profile(profile)?;
+    git_ops::validate_clone_profile(profile)?;
+    let parent = fs::canonicalize(&destination_parent)
+        .map_err(|error| format!("Clone destination is not accessible: {error}"))?;
+    if !parent.is_dir() {
+        return Err("Clone destination must be an existing directory.".into());
+    }
+    let home = git_ops::home_directory()
+        .ok_or_else(|| "User home directory is unavailable.".to_string())?;
+    let home = fs::canonicalize(home)
+        .map_err(|error| format!("User home directory is unavailable: {error}"))?;
+    if !parent.starts_with(&home) {
+        return Err("Clone destination must be inside the user home directory.".into());
+    }
+    if parent.join(&repository_name).exists() {
+        return Err("The clone destination already exists.".into());
+    }
+    Ok((url, parent.to_string_lossy().into_owned(), repository_name))
+}
+
 pub fn remove_repository(store: &StateStore, id: String) -> Result<AppData, String> {
     let _guard = store.lock()?;
     let mut data = store.load()?;
@@ -680,6 +716,59 @@ pub fn list_pull_requests(
             pull_requests: items.into_iter().map(normalize_pull_request).collect(),
         })
     }
+}
+
+pub fn preview_merge_pull_request(
+    store: &StateStore,
+    repository_id: String,
+    profile_id: String,
+    number: u64,
+) -> Result<(crate::models::ManagedPullRequest, Result<(), String>), String> {
+    if number == 0 {
+        return Err("Pull request number must be positive.".into());
+    }
+    let (repository, profile) = {
+        let _guard = store.lock()?;
+        let data = store.load()?;
+        let (repository, profile) = find_assignment(&data, &repository_id, &profile_id)?;
+        ensure_applied_assignment(repository, profile, &profile_id, "merging a pull request")?;
+        (repository.clone(), profile.clone())
+    };
+    let directory = connected_gh_directory(store, &profile)?;
+    let name = github_repository_name(&repository)?;
+    let item = read_pull_request(&directory, &repository.path, &name, number)?;
+    let validation = validate_pull_request_for_merge(&item, &item.head_ref_oid);
+    Ok((normalize_pull_request(item), validation))
+}
+
+pub fn preview_publish_repository(
+    store: &StateStore,
+    repository_id: String,
+    profile_id: String,
+    name: String,
+    visibility: String,
+    description: Option<String>,
+) -> Result<(String, Option<String>, String), String> {
+    let name = validate_github_repository_name(&name)?;
+    let description = validate_github_description(description)?;
+    if !matches!(visibility.as_str(), "private" | "public") {
+        return Err("Repository visibility must be private or public.".into());
+    }
+    let (repository, profile) = {
+        let _guard = store.lock()?;
+        let data = store.load()?;
+        let (repository, profile) = find_assignment(&data, &repository_id, &profile_id)?;
+        ensure_applied_assignment(repository, profile, &profile_id, "publishing")?;
+        (repository.clone(), profile.clone())
+    };
+    git_ops::validate_publish_source(&repository)?;
+    let directory = connected_gh_directory(store, &profile)?;
+    let status = inspect_gh_directory(&directory);
+    let username = status
+        .username
+        .filter(|_| status.authenticated)
+        .ok_or_else(|| "Connect this Profile to GitHub before publishing.".to_string())?;
+    Ok((name, description, username))
 }
 
 pub fn merge_pull_request(
