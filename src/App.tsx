@@ -404,7 +404,7 @@ function ApplyDialog({
               <div className="change-values">
                 <span>{change.currentValue || copy.notSet}</span>
                 <ChevronIcon />
-                <strong>{change.nextValue}</strong>
+                <strong>{change.nextValue ?? copy.removedValue}</strong>
               </div>
             </div>
           ))}
