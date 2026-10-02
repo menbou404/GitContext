@@ -242,11 +242,11 @@ export async function previewAssignment(
       changes: [
         { key: "user.name", currentValue: current?.gitName ?? null, nextValue: profile.gitName },
         { key: "user.email", currentValue: current?.gitEmail ?? null, nextValue: profile.gitEmail },
-        {
+        ...(profile.sshKeyPath || current?.sshKeyPath ? [{
           key: "core.sshCommand",
           currentValue: current?.sshKeyPath ? "Managed SSH identity" : null,
-          nextValue: profile.sshKeyPath ? `ssh -i \"${profile.sshKeyPath}\" -o IdentitiesOnly=yes` : "No change",
-        },
+          nextValue: profile.sshKeyPath ? `ssh -i \"${profile.sshKeyPath}\" -o IdentitiesOnly=yes` : null,
+        }] : []),
         { key: "gitcontext.profileId", currentValue: repository.profileId ?? null, nextValue: profile.id },
       ],
     };

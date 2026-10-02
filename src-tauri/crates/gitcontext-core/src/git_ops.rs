@@ -1,5 +1,4 @@
 use std::{
-    collections::BTreeMap,
     env, fs,
     path::{Path, PathBuf},
     process::{Command, Output},
@@ -58,7 +57,7 @@ pub fn clone_repository(
 
     let ssh_command = desired_config(profile)?
         .into_iter()
-        .find_map(|(key, value)| (key == "core.sshCommand").then_some(value))
+        .find_map(|(key, value)| (key == "core.sshCommand").then_some(value).flatten())
         .ok_or_else(|| "Choose an SSH private key for this Profile before cloning.".to_string())?;
     let destination_text = destination.to_string_lossy().into_owned();
     let output = Command::new("git")
@@ -88,15 +87,7 @@ pub fn build_preview(
     gh_available: bool,
 ) -> Result<ApplyPreview, String> {
     let root = repository_root(&repository.path)?;
-    let desired = desired_config(profile)?;
-    let changes = desired
-        .iter()
-        .map(|(key, value)| ConfigChange {
-            key: key.clone(),
-            current_value: read_local_config(&root, key),
-            next_value: value.clone(),
-        })
-        .collect();
+    let changes = config_changes(&root, profile)?;
 
     let mut warnings = Vec::new();
     if profile.gh_config_dir.is_some() && !gh_available {
@@ -119,23 +110,22 @@ pub fn build_preview(
 
 pub fn apply_profile(repository: &RepositoryRecord, profile: &Profile) -> Result<(), String> {
     let root = repository_root(&repository.path)?;
-    let desired = desired_config(profile)?;
-    let previous: BTreeMap<String, Option<String>> = desired
-        .iter()
-        .map(|(key, _)| (key.clone(), read_local_config(&root, key)))
-        .collect();
-    let mut changed_keys: Vec<String> = Vec::new();
+    let changes = config_changes(&root, profile)?;
+    let mut changed = Vec::new();
 
-    for (key, value) in &desired {
-        if let Err(error) = write_local_config(&root, key, value) {
-            for changed in changed_keys.iter().rev() {
-                restore_local_config(&root, changed, previous.get(changed).cloned().flatten());
-            }
+    for change in &changes {
+        let result = match &change.next_value {
+            Some(value) => write_local_config(&root, &change.key, value),
+            None => unset_local_config(&root, &change.key),
+        };
+        if let Err(error) = result {
+            rollback_local_config(&root, &changed);
             return Err(format!(
-                "No changes were kept because Git rejected {key}: {error}"
+                "No changes were kept because Git rejected {}: {error}",
+                change.key
             ));
         }
-        changed_keys.push(key.clone());
+        changed.push(change.clone());
     }
     Ok(())
 }
@@ -525,7 +515,7 @@ fn validate_push_settings(root: &Path, profile: &Profile) -> Result<String, Stri
     validate_github_ssh_remote(&remote_url)?;
     let expected_ssh = desired_config(profile)?
         .into_iter()
-        .find_map(|(key, value)| (key == "core.sshCommand").then_some(value))
+        .find_map(|(key, value)| (key == "core.sshCommand").then_some(value).flatten())
         .ok_or_else(|| "Choose an SSH private key for this Profile before pushing.".to_string())?;
     if read_local_config(root, "core.sshCommand").as_deref() != Some(expected_ssh.as_str()) {
         return Err("Reapply this Profile before pushing to GitHub.".into());
@@ -595,28 +585,62 @@ fn repository_root(input: &str) -> Result<PathBuf, String> {
     Ok(discovered)
 }
 
-fn desired_config(profile: &Profile) -> Result<Vec<(String, String)>, String> {
+fn desired_config(profile: &Profile) -> Result<Vec<(String, Option<String>)>, String> {
     let mut values = vec![
-        ("user.name".into(), profile.git_name.clone()),
-        ("user.email".into(), profile.git_email.clone()),
-        ("gitcontext.profileId".into(), profile.id.clone()),
-        ("gitcontext.profileName".into(), profile.label.clone()),
+        ("user.name".into(), Some(profile.git_name.clone())),
+        ("user.email".into(), Some(profile.git_email.clone())),
+        ("gitcontext.profileId".into(), Some(profile.id.clone())),
+        ("gitcontext.profileName".into(), Some(profile.label.clone())),
+        (
+            "gitcontext.githubUser".into(),
+            profile.github_username.clone(),
+        ),
+        (
+            "gitcontext.ghConfigDir".into(),
+            profile.gh_config_dir.clone(),
+        ),
     ];
-    if let Some(username) = &profile.github_username {
-        values.push(("gitcontext.githubUser".into(), username.clone()));
-    }
-    if let Some(directory) = &profile.gh_config_dir {
-        values.push(("gitcontext.ghConfigDir".into(), directory.clone()));
-    }
     if let Some(key_path) = &profile.ssh_key_path {
         let key = validate_ssh_private_key(key_path)?;
         let portable = key.to_string_lossy().replace('\\', "/");
         values.push((
             "core.sshCommand".into(),
-            format!("ssh -i \"{portable}\" -o IdentitiesOnly=yes"),
+            Some(format!("ssh -i \"{portable}\" -o IdentitiesOnly=yes")),
         ));
+    } else {
+        values.push(("core.sshCommand".into(), None));
     }
     Ok(values)
+}
+
+fn is_gitcontext_ssh_command(value: &str) -> bool {
+    value
+        .strip_prefix("ssh -i \"")
+        .and_then(|path| path.strip_suffix("\" -o IdentitiesOnly=yes"))
+        .is_some_and(|path| !path.is_empty() && !path.contains(['"', '\n', '\r']))
+}
+
+fn config_changes(root: &Path, profile: &Profile) -> Result<Vec<ConfigChange>, String> {
+    Ok(desired_config(profile)?
+        .into_iter()
+        .filter_map(|(key, next_value)| {
+            let current_value = read_local_config(root, &key);
+            if next_value.is_none()
+                && (current_value.is_none()
+                    || (key == "core.sshCommand"
+                        && !current_value
+                            .as_deref()
+                            .is_some_and(is_gitcontext_ssh_command)))
+            {
+                return None;
+            }
+            Some(ConfigChange {
+                key,
+                current_value,
+                next_value,
+            })
+        })
+        .collect())
 }
 
 fn validate_ssh_private_key(input: &str) -> Result<PathBuf, String> {
@@ -663,7 +687,9 @@ pub fn home_directory() -> Option<PathBuf> {
 }
 
 fn read_local_config(root: &Path, key: &str) -> Option<String> {
-    git_optional(root, &["config", "--local", "--get", key])
+    run_git(root, &["config", "--local", "--get", key])
+        .ok()
+        .and_then(|output| output_text(&output).ok())
 }
 
 fn write_local_config(root: &Path, key: &str, value: &str) -> Result<(), String> {
@@ -679,10 +705,18 @@ fn restore_local_config(root: &Path, key: &str, previous: Option<String>) {
     if let Some(value) = previous {
         let _ = write_local_config(root, key, &value);
     } else {
-        let _ = Command::new("git")
-            .current_dir(root)
-            .args(["config", "--local", "--unset-all", key])
-            .output();
+        let _ = unset_local_config(root, key);
+    }
+}
+
+fn unset_local_config(root: &Path, key: &str) -> Result<(), String> {
+    let output = run_git(root, &["config", "--local", "--unset-all", key])?;
+    output_text(&output).map(|_| ())
+}
+
+fn rollback_local_config(root: &Path, changed: &[ConfigChange]) {
+    for change in changed.iter().rev() {
+        restore_local_config(root, &change.key, change.current_value.clone());
     }
 }
 
@@ -718,14 +752,170 @@ fn output_text(output: &Output) -> Result<String, String> {
 mod tests {
     use std::{
         fs,
+        path::PathBuf,
         time::{SystemTime, UNIX_EPOCH},
     };
 
     use super::{
-        build_commit_preview, commit_all_changes, create_working_branch, parse_ahead_behind,
-        parse_working_tree_changes, run_git, validate_commit_message, validate_github_ssh_remote,
+        apply_profile, build_commit_preview, build_preview, commit_all_changes,
+        create_working_branch, is_gitcontext_ssh_command, parse_ahead_behind,
+        parse_working_tree_changes, read_local_config, rollback_local_config, run_git,
+        unset_local_config, validate_commit_message, validate_github_ssh_remote,
+        write_local_config,
     };
-    use crate::models::{Profile, RepositoryRecord};
+    use crate::models::{ConfigChange, Profile, RepositoryRecord};
+
+    fn apply_test_repository() -> (PathBuf, RepositoryRecord, Profile) {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("git-context-apply-test-{suffix}"));
+        fs::create_dir_all(&root).unwrap();
+        assert!(run_git(&root, &["init"]).unwrap().status.success());
+        let repository = RepositoryRecord {
+            id: "test-repository".into(),
+            name: "test".into(),
+            path: root.to_string_lossy().into_owned(),
+            remote_url: None,
+            branch: None,
+            profile_id: None,
+            last_applied_at: None,
+        };
+        let profile = Profile {
+            id: "test-profile".into(),
+            label: "Test".into(),
+            accent: "#123456".into(),
+            git_name: "Test User".into(),
+            git_email: "test@example.com".into(),
+            github_username: None,
+            ssh_key_path: None,
+            gh_config_dir: None,
+        };
+        (root, repository, profile)
+    }
+
+    #[test]
+    fn apply_removes_stale_optional_identity_settings() {
+        let (root, repository, profile) = apply_test_repository();
+        write_local_config(&root, "gitcontext.githubUser", "old-user").unwrap();
+        write_local_config(&root, "gitcontext.ghConfigDir", "old-gh-directory").unwrap();
+
+        let preview = build_preview(&repository, &profile, false).unwrap();
+        for key in ["gitcontext.githubUser", "gitcontext.ghConfigDir"] {
+            let change = preview
+                .changes
+                .iter()
+                .find(|change| change.key == key)
+                .unwrap();
+            assert!(change.current_value.is_some());
+            assert_eq!(change.next_value, None);
+        }
+        let json = serde_json::to_value(&preview).unwrap();
+        assert!(json["changes"].as_array().unwrap().iter().any(|change| {
+            change["key"] == "gitcontext.ghConfigDir" && change["nextValue"].is_null()
+        }));
+
+        apply_profile(&repository, &profile).unwrap();
+        assert_eq!(read_local_config(&root, "gitcontext.githubUser"), None);
+        assert_eq!(read_local_config(&root, "gitcontext.ghConfigDir"), None);
+        assert_eq!(
+            read_local_config(&root, "user.name").as_deref(),
+            Some("Test User")
+        );
+        assert_eq!(
+            read_local_config(&root, "user.email").as_deref(),
+            Some("test@example.com")
+        );
+        assert_eq!(
+            read_local_config(&root, "gitcontext.profileId").as_deref(),
+            Some("test-profile")
+        );
+        assert_eq!(
+            read_local_config(&root, "gitcontext.profileName").as_deref(),
+            Some("Test")
+        );
+        let repeated = build_preview(&repository, &profile, false).unwrap();
+        assert!(!repeated
+            .changes
+            .iter()
+            .any(|change| change.next_value.is_none()));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn apply_removes_only_gitcontext_ssh_command() {
+        let (root, repository, profile) = apply_test_repository();
+        let managed = "ssh -i \"/temporary/key\" -o IdentitiesOnly=yes";
+        write_local_config(&root, "core.sshCommand", managed).unwrap();
+        let preview = build_preview(&repository, &profile, true).unwrap();
+        let change = preview
+            .changes
+            .iter()
+            .find(|change| change.key == "core.sshCommand")
+            .unwrap();
+        assert_eq!(change.current_value.as_deref(), Some(managed));
+        assert_eq!(change.next_value, None);
+        apply_profile(&repository, &profile).unwrap();
+        assert_eq!(read_local_config(&root, "core.sshCommand"), None);
+
+        write_local_config(&root, "core.sshCommand", "ssh -F /dev/null").unwrap();
+        let preview = build_preview(&repository, &profile, true).unwrap();
+        assert!(!preview
+            .changes
+            .iter()
+            .any(|change| change.key == "core.sshCommand"));
+        apply_profile(&repository, &profile).unwrap();
+        assert_eq!(
+            read_local_config(&root, "core.sshCommand").as_deref(),
+            Some("ssh -F /dev/null")
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn identifies_gitcontext_ssh_command_format() {
+        assert!(is_gitcontext_ssh_command(
+            "ssh -i \"C:/keys/test key\" -o IdentitiesOnly=yes"
+        ));
+        for value in [
+            "ssh -F /dev/null",
+            "ssh -i /temporary/key -o IdentitiesOnly=yes",
+            "ssh -i \"\" -o IdentitiesOnly=yes",
+            "ssh -i \"/temporary/key\" -o StrictHostKeyChecking=no",
+            "ssh -i \"/temporary/\"key\" -o IdentitiesOnly=yes",
+        ] {
+            assert!(!is_gitcontext_ssh_command(value));
+        }
+    }
+
+    #[test]
+    fn rollback_restores_deleted_and_newly_set_keys() {
+        let (root, _, _) = apply_test_repository();
+        let old_value = "old-gh-directory";
+        write_local_config(&root, "gitcontext.ghConfigDir", old_value).unwrap();
+        let changed = [
+            ConfigChange {
+                key: "gitcontext.ghConfigDir".into(),
+                current_value: Some(old_value.into()),
+                next_value: None,
+            },
+            ConfigChange {
+                key: "gitcontext.githubUser".into(),
+                current_value: None,
+                next_value: Some("new-user".into()),
+            },
+        ];
+        unset_local_config(&root, &changed[0].key).unwrap();
+        write_local_config(&root, &changed[1].key, "new-user").unwrap();
+        rollback_local_config(&root, &changed);
+        assert_eq!(
+            read_local_config(&root, &changed[0].key).as_deref(),
+            Some(old_value)
+        );
+        assert_eq!(read_local_config(&root, &changed[1].key), None);
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn push_accepts_only_standard_github_ssh_remotes() {

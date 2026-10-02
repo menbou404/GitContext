@@ -241,7 +241,7 @@ export interface MergePullRequestResult {
 export interface ConfigChange {
   key: string;
   currentValue?: string | null;
-  nextValue: string;
+  nextValue: string | null;
 }
 
 export interface ApplyPreview {

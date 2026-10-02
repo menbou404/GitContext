@@ -92,7 +92,7 @@ pub struct GhProfileStatus {
 pub struct ConfigChange {
     pub key: String,
     pub current_value: Option<String>,
-    pub next_value: String,
+    pub next_value: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
