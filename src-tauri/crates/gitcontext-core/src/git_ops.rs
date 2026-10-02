@@ -465,6 +465,25 @@ pub fn origin_url(repository_path: &str) -> Result<String, String> {
         .ok_or_else(|| "GitHub CLI did not configure the origin remote.".into())
 }
 
+/// Read current local identity without returning any configuration values.
+pub fn inspect_identity_status(
+    repository: &RepositoryRecord,
+    profile: Option<&Profile>,
+) -> Result<(String, Vec<WorkingTreeChange>, Vec<ConfigChange>), String> {
+    let root = repository_root(&repository.path)?;
+    let branch = current_branch(&root, "inspecting the repository")?;
+    let changes = working_tree_changes(&root)?;
+    // Reuse the apply plan so status agrees with what applying would change.
+    let mismatches = match profile {
+        Some(profile) => config_changes(&root, profile)?
+            .into_iter()
+            .filter(|change| change.current_value != change.next_value)
+            .collect(),
+        None => Vec::new(),
+    };
+    Ok((branch, changes, mismatches))
+}
+
 fn validate_github_ssh_remote(value: &str) -> Result<(), String> {
     parse_github_ssh_remote(value).map(|_| ())
 }

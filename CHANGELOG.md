@@ -13,6 +13,7 @@
 - 作業ブランチ作成、commit、push、Pull Request作成を安全に案内する再開可能なフロー
 - 開いているPull Request、CI、競合、レビュー状態の確認と、先頭commitを固定した安全なmergeフロー
 - 状態ファイルの自動バックアップ（保存・データ移行の前に最新20世代を保持）
+- AIエージェント向けMCPサーバー`gitcontext-mcp`（開発中・読み取り専用）：Profileとリポジトリの一覧、作業フォルダからのリポジトリ検索、状態とIdentity一致の確認、Profile候補の提案、各種プレビュー、Pull Request一覧。SSH鍵はファイル名だけ、gh設定ディレクトリは返さない
 - 開発者向け：個人情報・秘密情報のcommitを防ぐGit hook（ローカル専用の禁止語リスト対応）と、CIでのプライバシー・秘密情報スキャン
 
 ### Changed

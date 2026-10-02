@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/gitcontext-core"]
+members = ["crates/gitcontext-core", "crates/gitcontext-mcp"]
 
 [package]
 name = "git-context"

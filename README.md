@@ -103,6 +103,17 @@ npm run tauri dev
 
 状態ファイルには個人のProfileが含まれます。リポジトリ内へコピーしたり、commitしたりしないでください。
 
+### MCPサーバー（開発中）
+
+AIエージェントからGitContextのProfileとリポジトリを参照するMCPサーバー`gitcontext-mcp`を開発中です。現在は読み取り専用のツールだけを提供します。設計は[docs/MCP_DESIGN.md](docs/MCP_DESIGN.md)を参照してください。
+
+```powershell
+cargo build --manifest-path src-tauri\Cargo.toml -p gitcontext-mcp
+claude mcp add gitcontext -- "<リポジトリのパス>\src-tauri\target\debug\gitcontext-mcp.exe"
+```
+
+debugビルドのMCPサーバーは、開発版のデータ（`%APPDATA%\app.gitcontext.dev`）を参照します。
+
 ### ブラウザ用プレビュー
 
 ブラウザ用の操作プレビューは実際のGit設定を書き換えません。
