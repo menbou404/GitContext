@@ -1168,11 +1168,13 @@ dependencies = [
 name = "gitcontext-mcp"
 version = "0.1.0-beta.1"
 dependencies = [
+ "chrono",
  "gitcontext-core",
  "rmcp",
  "serde",
  "serde_json",
  "tokio",
+ "uuid",
 ]
 
 [[package]]
