@@ -4,6 +4,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { demoBootstrap } from "./demoData";
 import type {
   AppData,
+  AutoApprove,
   ApplyPreview,
   BootstrapResult,
   BranchResult,
@@ -104,6 +105,7 @@ export async function addRepository(path: string): Promise<RepositoryRecord> {
       branch: "main",
       profileId: null,
       lastAppliedAt: null,
+      autoApprove: { pushWorkBranch: false, createPullRequest: false },
     };
     demoState.repositories = [...demoState.repositories, record];
     return structuredClone(record);
@@ -117,6 +119,16 @@ export async function removeRepository(id: string): Promise<AppData> {
     return structuredClone(demoState);
   }
   return invoke<AppData>("remove_repository", { id });
+}
+
+export async function setRepositoryAutoApprove(repositoryId: string, autoApprove: AutoApprove): Promise<AppData> {
+  if (!inDesktopApp()) {
+    const repository = demoState.repositories.find((item) => item.id === repositoryId);
+    if (!repository) throw new Error("Repository was not found.");
+    repository.autoApprove = { ...autoApprove };
+    return structuredClone(demoState);
+  }
+  return invoke<AppData>("set_repository_auto_approve", { repositoryId, autoApprove });
 }
 
 export async function listGithubRepositories(profileId: string): Promise<GithubRepository[]> {
@@ -154,6 +166,7 @@ export async function cloneGithubRepository(options: CloneOptions): Promise<Clon
       branch: "main",
       profileId: profile.id,
       lastAppliedAt: new Date().toISOString(),
+      autoApprove: { pushWorkBranch: false, createPullRequest: false },
     };
     demoState.repositories = [...demoState.repositories, repository];
     return { data: structuredClone(demoState), repository: structuredClone(repository) };

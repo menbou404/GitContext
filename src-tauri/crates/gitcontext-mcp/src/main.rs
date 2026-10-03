@@ -681,130 +681,174 @@ impl GitContextServer {
                     }
                 }
             };
-        let method = confirmation_method(
-            self.trust_client_approval,
-            client.as_ref().is_some_and(|info| info.elicitation),
-            self.desktop_code_tab
-                || client.as_ref().is_some_and(|info| {
-                    unreliable_client(&info.name, UNRELIABLE_ELICITATION_CLIENTS)
-                }),
-        );
-        let method = match method {
-            Ok(method) => method,
-            Err(message) => {
-                return self
-                    .remote_result(
-                        name,
-                        &ids,
-                        client_name,
-                        approval_response.as_ref().map(|_| "elicitation"),
-                        Err(message.into()),
-                        true,
-                    )
-                    .await
-                    .into()
-            }
+        let auto_approved = if approval_response.is_none() {
+            let store_for_approval = store.clone();
+            let entry_for_approval = entry.clone();
+            tokio::task::spawn_blocking(move || {
+                let data = load(&store_for_approval).ok()?;
+                let repository = data
+                    .repositories
+                    .iter()
+                    .find(|item| item.id == entry_for_approval.repository_id)?;
+                if repository.profile_id.as_deref() != Some(entry_for_approval.profile_id.as_str())
+                {
+                    return None;
+                }
+                match &entry_for_approval.fingerprint {
+                    Fingerprint::Push { branch, .. }
+                        if repository.auto_approve.push_work_branch =>
+                    {
+                        let default_branch = operations::repository_default_branch(
+                            &store_for_approval,
+                            &entry_for_approval.repository_id,
+                            &entry_for_approval.profile_id,
+                        )
+                        .ok()?;
+                        Some(!branch.eq_ignore_ascii_case(&default_branch))
+                    }
+                    Fingerprint::CreatePullRequest { .. } => {
+                        Some(repository.auto_approve.create_pull_request)
+                    }
+                    _ => None,
+                }
+            })
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or(false)
+        } else {
+            false
         };
-        let confirmation = match method {
-            Confirmation::Client => "client",
-            Confirmation::Elicitation => "elicitation",
-        };
-        if approval_response.is_some() && method != Confirmation::Elicitation {
-            return self
-                .remote_result(
-                    name,
-                    &ids,
-                    client_name,
-                    Some("elicitation"),
-                    Err("Confirmation retry is invalid.".into()),
-                    true,
-                )
-                .await
-                .into();
-        }
-        if let Some((responses, responded_after)) = approval_response {
-            if let Err(reason) = interpret_mrtr_approval(&responses, responded_after) {
-                return self
-                    .remote_result(
-                        name,
-                        &ids,
-                        client_name,
-                        Some(confirmation),
-                        Err(reason),
-                        true,
-                    )
-                    .await
-                    .into();
-            }
-        } else if method == Confirmation::Elicitation {
-            let prompt = match self.confirmation_prompt(name, &entry, target.as_deref()) {
-                Ok(prompt) => prompt,
-                Err(error) => {
+        let confirmation = if auto_approved {
+            "auto"
+        } else {
+            let method = confirmation_method(
+                self.trust_client_approval,
+                client.as_ref().is_some_and(|info| info.elicitation),
+                self.desktop_code_tab
+                    || client.as_ref().is_some_and(|info| {
+                        unreliable_client(&info.name, UNRELIABLE_ELICITATION_CLIENTS)
+                    }),
+            );
+            let method = match method {
+                Ok(method) => method,
+                Err(message) => {
                     return self
                         .remote_result(
                             name,
                             &ids,
                             client_name,
-                            Some(confirmation),
-                            Err(error),
+                            approval_response.as_ref().map(|_| "elicitation"),
+                            Err(message.into()),
                             true,
                         )
                         .await
                         .into()
                 }
             };
-            if modern {
-                let schema = match ElicitationSchema::from_type::<Approval>() {
-                    Ok(schema) => schema,
-                    Err(_) => {
+            let confirmation = match method {
+                Confirmation::Client => "client",
+                Confirmation::Elicitation => "elicitation",
+            };
+            if approval_response.is_some() && method != Confirmation::Elicitation {
+                return self
+                    .remote_result(
+                        name,
+                        &ids,
+                        client_name,
+                        Some("elicitation"),
+                        Err("Confirmation retry is invalid.".into()),
+                        true,
+                    )
+                    .await
+                    .into();
+            }
+            if let Some((responses, responded_after)) = approval_response {
+                if let Err(reason) = interpret_mrtr_approval(&responses, responded_after) {
+                    return self
+                        .remote_result(
+                            name,
+                            &ids,
+                            client_name,
+                            Some(confirmation),
+                            Err(reason),
+                            true,
+                        )
+                        .await
+                        .into();
+                }
+            } else if method == Confirmation::Elicitation {
+                let prompt = match self.confirmation_prompt(name, &entry, target.as_deref()) {
+                    Ok(prompt) => prompt,
+                    Err(error) => {
                         return self
                             .remote_result(
                                 name,
                                 &ids,
                                 client_name,
                                 Some(confirmation),
-                                Err("Confirmation failed.".into()),
+                                Err(error),
                                 true,
                             )
                             .await
                             .into()
                     }
                 };
-                let state = self.pending_confirmations.issue(
-                    entry,
-                    preview_id,
-                    name,
-                    prompt.clone(),
-                    self.confirmation_timeout,
-                );
-                let mut requests = BTreeMap::new();
-                requests.insert(
-                    "approval".into(),
-                    InputRequest::Elicitation(ElicitRequest::new(
-                        ElicitRequestParams::FormElicitationParams {
-                            meta: None,
-                            message: prompt,
-                            requested_schema: schema,
-                        },
-                    )),
-                );
-                return InputRequiredResult::new(Some(requests), Some(state)).into();
-            }
-            if let Err(reason) = elicit_approval(&context, prompt, self.confirmation_timeout).await
-            {
-                return self
-                    .remote_result(
+                if modern {
+                    let schema = match ElicitationSchema::from_type::<Approval>() {
+                        Ok(schema) => schema,
+                        Err(_) => {
+                            return self
+                                .remote_result(
+                                    name,
+                                    &ids,
+                                    client_name,
+                                    Some(confirmation),
+                                    Err("Confirmation failed.".into()),
+                                    true,
+                                )
+                                .await
+                                .into()
+                        }
+                    };
+                    let state = self.pending_confirmations.issue(
+                        entry,
+                        preview_id,
                         name,
-                        &ids,
-                        client_name,
-                        Some(confirmation),
-                        Err(reason),
-                        true,
-                    )
-                    .await
-                    .into();
+                        prompt.clone(),
+                        self.confirmation_timeout,
+                    );
+                    let mut requests = BTreeMap::new();
+                    requests.insert(
+                        "approval".into(),
+                        InputRequest::Elicitation(ElicitRequest::new(
+                            ElicitRequestParams::FormElicitationParams {
+                                meta: None,
+                                message: prompt,
+                                requested_schema: schema,
+                            },
+                        )),
+                    );
+                    return InputRequiredResult::new(Some(requests), Some(state)).into();
+                }
+                if let Err(reason) =
+                    elicit_approval(&context, prompt, self.confirmation_timeout).await
+                {
+                    return self
+                        .remote_result(
+                            name,
+                            &ids,
+                            client_name,
+                            Some(confirmation),
+                            Err(reason),
+                            true,
+                        )
+                        .await
+                        .into();
+                }
             }
-        }
+            confirmation
+        };
         let store_for_task = store.clone();
         let checked = tokio::task::spawn_blocking(move || {
             let current =
@@ -991,6 +1035,11 @@ impl GitContextServer {
                 if confirmation == Some("client") {
                     value["confirmationNote"] = json!("Confirmation was entrusted to the client.");
                 }
+                if confirmation == Some("auto") {
+                    value["approval"] = json!("auto");
+                    value["approvalNote"] =
+                        json!("Approved automatically by this repository's GitContext setting.");
+                }
                 if let Some(warning) = warning {
                     value["warning"] = json!(warning);
                 }
@@ -998,6 +1047,11 @@ impl GitContextServer {
             }
             Err(error) => {
                 let mut error = local_error(error, &self.store);
+                if confirmation == Some("auto") {
+                    error.push_str(
+                        " Approved automatically by this repository's GitContext setting.",
+                    );
+                }
                 if let Some(warning) = warning {
                     error.push(' ');
                     error.push_str(warning);
@@ -1185,7 +1239,7 @@ impl GitContextServer {
             let record = repository(&data, &input.repository_id)?;
             let profile = record.profile_id.as_ref().and_then(|id| data.profiles.iter().find(|item| &item.id == id));
             let (branch, changes, mismatches) = git_ops::inspect_identity_status(record, profile)?;
-            Ok(json!({ "repository": output::RepositoryDto::new(record, &data), "branch": branch,
+            Ok(json!({ "repository": output::RepositoryDto::new(record, &data), "autoApprove": record.auto_approve, "branch": branch,
                 "changes": output::changes(&changes), "profile": profile.map(|item| output::ProfileDto::new(item, None)),
                 "identityInSync": profile.is_some() && mismatches.is_empty(),
                 "mismatchedKeys": mismatches.iter().map(|item| item.key.as_str()).collect::<Vec<_>>(),
@@ -1815,6 +1869,38 @@ async fn main() -> ExitCode {
 mod remote_tests {
     use super::*;
     use rmcp::service::{ElicitationError, ServiceError};
+
+    #[tokio::test]
+    async fn auto_result_reports_approval_in_structured_and_text_content() {
+        let dir =
+            std::env::temp_dir().join(format!("gitcontext-auto-result-{}", uuid::Uuid::new_v4()));
+        let server = GitContextServer {
+            store: StateStore::new(dir.clone()),
+            tier: Tier::Remote,
+            previews: Arc::new(Previews::default()),
+            pending_confirmations: Arc::new(PendingConfirmations::default()),
+            trust_client_approval: false,
+            desktop_code_tab: false,
+            confirmation_timeout: Duration::from_secs(120),
+        };
+        let result = server
+            .remote_result(
+                "push",
+                &AuditIds::default(),
+                None,
+                Some("auto"),
+                Ok((json!({"branch":"work"}), "Push completed".into())),
+                false,
+            )
+            .await;
+        let value = serde_json::to_value(result).unwrap();
+        assert_eq!(value["structuredContent"]["approval"], "auto");
+        assert!(value["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("Approved automatically by this repository's GitContext setting."));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn request_metadata_selects_elicitation_only_with_form_capability() {

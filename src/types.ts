@@ -17,6 +17,12 @@ export interface RepositoryRecord {
   branch?: string | null;
   profileId?: string | null;
   lastAppliedAt?: string | null;
+  autoApprove: AutoApprove;
+}
+
+export interface AutoApprove {
+  pushWorkBranch: boolean;
+  createPullRequest: boolean;
 }
 
 export interface AppData {

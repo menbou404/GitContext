@@ -202,6 +202,7 @@ pub fn inspect_repository(input: &str) -> Result<RepositoryRecord, String> {
         branch: git_optional(&root, &["branch", "--show-current"]),
         profile_id: None,
         last_applied_at: None,
+        auto_approve: Default::default(),
     })
 }
 
@@ -372,11 +373,16 @@ pub fn inspect_pull_request_source(
     let changes = working_tree_changes(&root)?;
     let base_ref = format!("refs/remotes/origin/{base_branch}");
     let fetch_ref = format!("refs/heads/{base_branch}:{base_ref}");
-    output_text(&run_git(
-        &root,
-        &["fetch", "--no-tags", "origin", &fetch_ref],
-    )?)
-    .map_err(|error| format!("Could not refresh origin/{base_branch}: {error}"))?;
+    // The stdio fixture supplies a local tracking ref; debug tests must not contact GitHub.
+    if !(cfg!(debug_assertions)
+        && std::env::var_os("GITCONTEXT_TEST_SKIP_PULL_REQUEST_FETCH").is_some())
+    {
+        output_text(&run_git(
+            &root,
+            &["fetch", "--no-tags", "origin", &fetch_ref],
+        )?)
+        .map_err(|error| format!("Could not refresh origin/{base_branch}: {error}"))?;
+    }
     let range = format!("origin/{base_branch}..HEAD");
     let commits_ahead = output_text(&run_git(&root, &["rev-list", "--count", &range])?)?
         .parse::<u64>()
@@ -978,6 +984,7 @@ mod tests {
             branch: None,
             profile_id: None,
             last_applied_at: None,
+            auto_approve: Default::default(),
         };
         let profile = Profile {
             id: "test-profile".into(),
@@ -1272,6 +1279,7 @@ mod tests {
             branch: Some("main".into()),
             profile_id: Some("test-profile".into()),
             last_applied_at: Some("now".into()),
+            auto_approve: Default::default(),
         };
         let profile = Profile {
             id: "test-profile".into(),

@@ -28,6 +28,7 @@ import {
   pushRepository,
   removeRepository,
   saveProfile,
+  setRepositoryAutoApprove,
 } from "./backend";
 import {
   AlertIcon,
@@ -45,7 +46,7 @@ import {
   TerminalIcon,
   TrashIcon,
 } from "./Icons";
-import type { AppData, ApplyPreview, BootstrapResult, CloneOptions, CommitPreview, GhProfileStatus, GithubAuthPrompt, GithubRepository, ManagedPullRequest, MergePullRequestResult, MergeStrategy, Profile, PublishOptions, PullRequestManagement, PullRequestPreview, PullRequestResult, PushPreview, RepositoryRecord, RepositoryVisibility, SyncPreview } from "./types";
+import type { AppData, ApplyPreview, AutoApprove, BootstrapResult, CloneOptions, CommitPreview, GhProfileStatus, GithubAuthPrompt, GithubRepository, ManagedPullRequest, MergePullRequestResult, MergeStrategy, Profile, PublishOptions, PullRequestManagement, PullRequestPreview, PullRequestResult, PushPreview, RepositoryRecord, RepositoryVisibility, SyncPreview } from "./types";
 import { compactPath, initials, profileIsComplete } from "./types";
 import { localizeRuntimeMessage, uiCopy, type Locale } from "./i18n";
 import "./App.css";
@@ -1346,6 +1347,24 @@ function App({ locale = "en" }: { locale?: Locale }) {
     setNotice(copy.profileSaved(profile.label));
   };
 
+  const updateAutoApprove = async (field: keyof AutoApprove, enabled: boolean) => {
+    if (!selectedRepository || busy) return;
+    if (enabled && !window.confirm(copy.autoApproveConfirm)) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      const nextData = await setRepositoryAutoApprove(selectedRepository.id, {
+        ...selectedRepository.autoApprove,
+        [field]: enabled,
+      });
+      updateData(nextData);
+    } catch (error) {
+      setNotice(messageFrom(error, locale));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const reviewAssignment = async () => {
     if (!selectedRepository || !pendingProfile) return;
     setNotice(null);
@@ -1743,6 +1762,12 @@ function App({ locale = "en" }: { locale?: Locale }) {
                 </div>
 
                 <div className="scope-note"><ShieldIcon /><div><strong>{copy.repositoryLocalChange}</strong><span>{copy.globalSettingsUntouched}</span></div></div>
+
+                <fieldset className="auto-approve-settings" disabled={busy}>
+                  <legend>{copy.autoApproveTitle}</legend>
+                  <label><input type="checkbox" checked={selectedRepository.autoApprove.pushWorkBranch} onChange={(event) => updateAutoApprove("pushWorkBranch", event.currentTarget.checked)} />{copy.autoApprovePush}</label>
+                  <label><input type="checkbox" checked={selectedRepository.autoApprove.createPullRequest} onChange={(event) => updateAutoApprove("createPullRequest", event.currentTarget.checked)} />{copy.autoApprovePullRequest}</label>
+                </fieldset>
 
                 <button className="button button--primary button--wide" disabled={!pendingProfile || !profileIsComplete(pendingProfile) || busy} onClick={reviewAssignment}>{copy.reviewAndApply}</button>
                 {selectedRepository.remoteUrl ? (

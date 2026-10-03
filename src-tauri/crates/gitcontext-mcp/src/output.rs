@@ -1,6 +1,6 @@
 use gitcontext_core::models::{
-    AppData, ApplyPreview, ConfigChange, ManagedPullRequest, Profile, PullRequestSummary,
-    RepositoryRecord, WorkingTreeChange,
+    AppData, ApplyPreview, AutoApprove, ConfigChange, ManagedPullRequest, Profile,
+    PullRequestSummary, RepositoryRecord, WorkingTreeChange,
 };
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -63,6 +63,7 @@ pub struct RepositoryDto<'a> {
     profile_label: Option<&'a str>,
     applied: bool,
     last_applied_at: &'a Option<String>,
+    auto_approve: &'a AutoApprove,
 }
 
 impl<'a> RepositoryDto<'a> {
@@ -82,6 +83,7 @@ impl<'a> RepositoryDto<'a> {
             }),
             applied: repository.last_applied_at.is_some(),
             last_applied_at: &repository.last_applied_at,
+            auto_approve: &repository.auto_approve,
         }
     }
 }
@@ -179,6 +181,7 @@ mod tests {
                 branch: None,
                 profile_id: None,
                 last_applied_at: None,
+                auto_approve: AutoApprove::default(),
             },
             profile,
             changes: vec![

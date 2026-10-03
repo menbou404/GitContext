@@ -2,6 +2,14 @@ import { describe, expect, it } from "vitest";
 import { localizeRuntimeMessage, uiCopy } from "./i18n";
 
 describe("Japanese UI copy", () => {
+  it("uses the repository auto-approval wording in both languages", () => {
+    expect(uiCopy.ja.autoApproveTitle).toBe("AIによる操作の自動承認");
+    expect(uiCopy.ja.autoApprovePush).toBe("作業ブランチへのpush");
+    expect(uiCopy.ja.autoApprovePullRequest).toBe("Pull Requestの作成");
+    expect(uiCopy.ja.autoApproveConfirm).toContain("mergeと既定ブランチへのpushは、常に確認します。");
+    expect(uiCopy.en.autoApproveConfirm).toContain("default branch");
+  });
+
   it("provides localized labels and dynamic notices", () => {
     expect(uiCopy.ja.addRepository).toBe("リポジトリを追加");
     expect(uiCopy.ja.repositoryAdded("sample")).toContain("sampleを追加しました");

@@ -5,6 +5,7 @@
 ## [Unreleased]
 
 ### Added
+- リポジトリごとの「AIによる操作の自動承認」。GUIで有効にした作業ブランチへのpushとPull Request作成をMCPが確認なしで実行し、既定ブランチへのpushとmergeは引き続き確認する
 
 - Profile-aware Fetch、ahead/behind表示、安全なFast-forward Pull、Pushをまとめたリポジトリ同期フロー
 - ProfileのGitHub一覧またはSSH URLからcloneし、同じIdentityを自動適用するフロー

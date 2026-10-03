@@ -46,6 +46,7 @@ export const demoBootstrap: BootstrapResult = {
         branch: "main",
         profileId: "open-source",
         lastAppliedAt: "2026-08-26T00:20:00Z",
+        autoApprove: { pushWorkBranch: false, createPullRequest: false },
       },
       {
         id: "repo-school",
@@ -55,6 +56,7 @@ export const demoBootstrap: BootstrapResult = {
         branch: "main",
         profileId: "university-lab",
         lastAppliedAt: "2026-08-25T11:05:00Z",
+        autoApprove: { pushWorkBranch: false, createPullRequest: false },
       },
       {
         id: "repo-unassigned",
@@ -64,6 +66,7 @@ export const demoBootstrap: BootstrapResult = {
         branch: "develop",
         profileId: null,
         lastAppliedAt: null,
+        autoApprove: { pushWorkBranch: false, createPullRequest: false },
       },
     ],
   },

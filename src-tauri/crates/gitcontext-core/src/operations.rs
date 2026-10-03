@@ -3,8 +3,8 @@ use crate::{
     git_ops,
     github::*,
     models::{
-        normalize_profile, validate_profile, AppData, ApplyPreview, BootstrapResult, BranchResult,
-        CloneResult, CommitPreview, CommitResult, GhProfileStatus, GithubRepository,
+        normalize_profile, validate_profile, AppData, ApplyPreview, AutoApprove, BootstrapResult,
+        BranchResult, CloneResult, CommitPreview, CommitResult, GhProfileStatus, GithubRepository,
         MergePullRequestResult, Profile, PublishResult, PullRequestManagement, PullRequestPreview,
         PullRequestResult, PushPreview, PushResult, RepositoryRecord, SyncPreview,
     },
@@ -148,6 +148,40 @@ pub fn add_repository(store: &StateStore, path: String) -> Result<RepositoryReco
     data.repositories.push(candidate.clone());
     store.save(&data)?;
     Ok(candidate)
+}
+
+pub fn set_repository_auto_approve(
+    store: &StateStore,
+    repository_id: String,
+    auto_approve: AutoApprove,
+) -> Result<AppData, String> {
+    let _guard = store.lock()?;
+    let mut data = store.load()?;
+    let repository = data
+        .repositories
+        .iter_mut()
+        .find(|item| item.id == repository_id)
+        .ok_or_else(|| "Repository was not found.".to_string())?;
+    repository.auto_approve = auto_approve;
+    store.save(&data)?;
+    Ok(data)
+}
+
+pub fn repository_default_branch(
+    store: &StateStore,
+    repository_id: &str,
+    profile_id: &str,
+) -> Result<String, String> {
+    let (repository, profile) = {
+        let _guard = store.lock()?;
+        let data = store.load()?;
+        let (repository, profile) = find_assignment(&data, repository_id, profile_id)?;
+        ensure_applied_assignment(repository, profile, profile_id, "pushing")?;
+        (repository.clone(), profile.clone())
+    };
+    let directory = connected_gh_directory(store, &profile)?;
+    let name = github_repository_name(&repository)?;
+    github_default_branch(&directory, &repository.path, &name)
 }
 
 pub fn list_github_repositories(
@@ -992,4 +1026,90 @@ fn find_assignment<'a>(
         .find(|item| item.id == profile_id)
         .ok_or_else(|| "Profile was not found.".to_string())?;
     Ok((repository, profile))
+}
+
+#[cfg(test)]
+mod auto_approve_tests {
+    use super::*;
+    use std::{path::Path, process::Command};
+
+    fn git(path: &Path, args: &[&str]) {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(path)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    fn auto_approval_survives_repository_updates() {
+        let root = std::env::temp_dir().join(format!("gitcontext-auto-{}", uuid::Uuid::new_v4()));
+        let repo = root.join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        git(&repo, &["init", "-b", "main"]);
+        let store = StateStore::new(root.join("data"));
+        let record = add_repository(&store, repo.to_string_lossy().into_owned()).unwrap();
+        assert!(!record.auto_approve.push_work_branch);
+        let mut old_state = serde_json::to_value(store.load().unwrap()).unwrap();
+        old_state["repositories"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("autoApprove");
+        fs::write(store.state_path(), old_state.to_string()).unwrap();
+        assert!(
+            !store.load().unwrap().repositories[0]
+                .auto_approve
+                .push_work_branch
+        );
+        let changed = set_repository_auto_approve(
+            &store,
+            record.id.clone(),
+            AutoApprove {
+                push_work_branch: true,
+                create_pull_request: true,
+            },
+        )
+        .unwrap();
+        assert!(changed.repositories[0].auto_approve.create_pull_request);
+        let again = add_repository(&store, repo.to_string_lossy().into_owned()).unwrap();
+        assert_eq!(again.id, record.id);
+        assert!(again.auto_approve.push_work_branch);
+        let profile = Profile {
+            id: "sample".into(),
+            label: "Sample".into(),
+            accent: "#112233".into(),
+            git_name: "Sample Person".into(),
+            git_email: "sample@example.com".into(),
+            github_username: None,
+            ssh_key_path: None,
+            gh_config_dir: None,
+        };
+        save_profile(&store, profile).unwrap();
+        let applied = apply_profile(&store, record.id.clone(), "sample".into()).unwrap();
+        assert!(applied.repositories[0].auto_approve.push_work_branch);
+        fs::write(repo.join("readme.txt"), "fixture").unwrap();
+        git(&repo, &["add", "readme.txt"]);
+        git(&repo, &["commit", "-m", "Initial fixture"]);
+        let branch =
+            create_branch(&store, record.id.clone(), "sample".into(), "work".into()).unwrap();
+        assert_eq!(branch.branch, "work");
+        assert!(branch.data.repositories[0].auto_approve.create_pull_request);
+        let reloaded = store.load().unwrap();
+        assert!(reloaded.repositories[0].auto_approve.push_work_branch);
+        assert!(
+            set_repository_auto_approve(&store, "missing".into(), AutoApprove::default()).is_err()
+        );
+        assert!(
+            store.load().unwrap().repositories[0]
+                .auto_approve
+                .push_work_branch
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
 }

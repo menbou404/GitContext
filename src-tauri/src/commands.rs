@@ -58,6 +58,15 @@ pub fn add_repository(
 }
 
 #[tauri::command]
+pub fn set_repository_auto_approve(
+    store: State<'_, StateStore>,
+    repository_id: String,
+    auto_approve: AutoApprove,
+) -> Result<AppData, String> {
+    operations::set_repository_auto_approve(&store, repository_id, auto_approve)
+}
+
+#[tauri::command]
 pub async fn list_github_repositories(
     store: State<'_, StateStore>,
     profile_id: String,

@@ -16,6 +16,15 @@ pub struct Profile {
     pub gh_config_dir: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoApprove {
+    #[serde(default)]
+    pub push_work_branch: bool,
+    #[serde(default)]
+    pub create_pull_request: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepositoryRecord {
@@ -30,6 +39,8 @@ pub struct RepositoryRecord {
     pub profile_id: Option<String>,
     #[serde(default)]
     pub last_applied_at: Option<String>,
+    #[serde(default)]
+    pub auto_approve: AutoApprove,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,6 +49,33 @@ pub struct AppData {
     pub version: u32,
     pub profiles: Vec<Profile>,
     pub repositories: Vec<RepositoryRecord>,
+}
+
+#[cfg(test)]
+mod auto_approve_tests {
+    use super::*;
+
+    #[test]
+    fn old_state_defaults_auto_approval_and_partial_settings() {
+        let old =
+            r#"{"version":2,"profiles":[],"repositories":[{"id":"r","name":"r","path":"r"}]}"#;
+        let data: AppData = serde_json::from_str(old).unwrap();
+        assert!(!data.repositories[0].auto_approve.push_work_branch);
+        assert!(!data.repositories[0].auto_approve.create_pull_request);
+        let partial = r#"{"version":2,"profiles":[],"repositories":[{"id":"r","name":"r","path":"r","autoApprove":{"pushWorkBranch":true}}]}"#;
+        let data: AppData = serde_json::from_str(partial).unwrap();
+        assert!(data.repositories[0].auto_approve.push_work_branch);
+        assert!(!data.repositories[0].auto_approve.create_pull_request);
+        let saved = serde_json::to_value(data).unwrap();
+        assert_eq!(
+            saved["repositories"][0]["autoApprove"]["pushWorkBranch"],
+            true
+        );
+        assert_eq!(
+            saved["repositories"][0]["autoApprove"]["createPullRequest"],
+            false
+        );
+    }
 }
 
 impl Default for AppData {
