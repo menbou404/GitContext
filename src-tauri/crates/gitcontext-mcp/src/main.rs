@@ -27,7 +27,13 @@ use rmcp::{
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::{collections::BTreeMap, path::Path, process::ExitCode, sync::Arc, time::Duration};
+use std::{
+    collections::BTreeMap,
+    path::Path,
+    process::ExitCode,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 #[derive(Clone)]
 struct GitContextServer {
@@ -36,6 +42,7 @@ struct GitContextServer {
     previews: Arc<Previews>,
     pending_confirmations: Arc<PendingConfirmations>,
     trust_client_approval: bool,
+    desktop_code_tab: bool,
     confirmation_timeout: Duration,
 }
 
@@ -54,6 +61,11 @@ struct ClientInfo {
 
 // Add a client name here if it advertises elicitation but fails to show the prompt.
 const UNRELIABLE_ELICITATION_CLIENTS: &[&str] = &[];
+const MIN_HUMAN_RESPONSE: Duration = Duration::from_secs(1);
+const AUTOMATIC_DECLINE: &str = "The client declined without showing GitContext's confirmation prompt. GitHub operations need a client that can show it. Review the AI integration settings in GitContext.";
+const AUTOMATIC_APPROVAL: &str = "The client approved too quickly for a person to have reviewed the confirmation. The operation was not run. Review the AI integration settings in GitContext.";
+const AUTOMATIC_AUDIT_SUMMARY: &str =
+    "Remote operation rejected: client answered without showing the prompt";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Confirmation {
@@ -66,10 +78,10 @@ fn confirmation_method(
     supports: bool,
     unreliable: bool,
 ) -> Result<Confirmation, &'static str> {
-    if trust {
-        Ok(Confirmation::Client)
-    } else if supports && !unreliable {
+    if supports && !unreliable {
         Ok(Confirmation::Elicitation)
+    } else if trust {
+        Ok(Confirmation::Client)
     } else {
         Err("This client cannot show GitContext's confirmation prompt. GitHub operations are disabled for it. Review the AI integration settings in GitContext.")
     }
@@ -635,7 +647,11 @@ impl GitContextServer {
                         .into();
                 }
                 debug_assert!(!pending.prompt.is_empty());
-                (pending.entry, ids, input_responses)
+                (
+                    pending.entry,
+                    ids,
+                    input_responses.map(|responses| (responses, pending.responded_after)),
+                )
             } else {
                 let first = {
                     let store = store.clone();
@@ -668,9 +684,10 @@ impl GitContextServer {
         let method = confirmation_method(
             self.trust_client_approval,
             client.as_ref().is_some_and(|info| info.elicitation),
-            client
-                .as_ref()
-                .is_some_and(|info| unreliable_client(&info.name, UNRELIABLE_ELICITATION_CLIENTS)),
+            self.desktop_code_tab
+                || client.as_ref().is_some_and(|info| {
+                    unreliable_client(&info.name, UNRELIABLE_ELICITATION_CLIENTS)
+                }),
         );
         let method = match method {
             Ok(method) => method,
@@ -705,8 +722,8 @@ impl GitContextServer {
                 .await
                 .into();
         }
-        if let Some(responses) = approval_response {
-            if let Err(reason) = interpret_mrtr_approval(&responses) {
+        if let Some((responses, responded_after)) = approval_response {
+            if let Err(reason) = interpret_mrtr_approval(&responses, responded_after) {
                 return self
                     .remote_result(
                         name,
@@ -948,7 +965,11 @@ impl GitContextServer {
             .as_ref()
             .map(|(_, summary)| summary.as_str())
             .unwrap_or(if rejected {
-                "Remote operation rejected"
+                if matches!(&result, Err(error) if error == AUTOMATIC_DECLINE || error == AUTOMATIC_APPROVAL) {
+                    AUTOMATIC_AUDIT_SUMMARY
+                } else {
+                    "Remote operation rejected"
+                }
             } else {
                 "Remote operation failed"
             });
@@ -1002,13 +1023,30 @@ fn interpret_approval(
     }
 }
 
-fn interpret_mrtr_approval(responses: &rmcp::model::InputResponses) -> Result<(), String> {
+fn interpret_mrtr_approval(
+    responses: &rmcp::model::InputResponses,
+    elapsed: Duration,
+) -> Result<(), String> {
     let Some(value) = responses.get("approval") else {
-        return Err("Confirmation declined.".into());
+        return check_response_time(Err("Confirmation declined.".into()), elapsed);
     };
-    let response: ElicitResult =
-        serde_json::from_value(value.clone()).map_err(|_| "Confirmation failed.".to_string())?;
-    interpret_approval(parse_approval_response(response))
+    let response: Result<ElicitResult, _> = serde_json::from_value(value.clone());
+    let result = response
+        .map_err(|_| "Confirmation failed.".to_string())
+        .and_then(|response| interpret_approval(parse_approval_response(response)));
+    check_response_time(result, elapsed)
+}
+
+fn check_response_time(result: Result<(), String>, elapsed: Duration) -> Result<(), String> {
+    if elapsed < MIN_HUMAN_RESPONSE {
+        match result {
+            Ok(()) => Err(AUTOMATIC_APPROVAL.into()),
+            Err(error) if error != "Confirmation timed out." => Err(AUTOMATIC_DECLINE.into()),
+            other => other,
+        }
+    } else {
+        result
+    }
 }
 
 fn parse_approval_response(
@@ -1039,6 +1077,7 @@ async fn elicit_approval(
     use rmcp::service::ElicitationError;
     let schema = ElicitationSchema::from_type::<Approval>()
         .map_err(|_| "Confirmation failed.".to_string())?;
+    let sent_at = Instant::now();
     let response = context
         .peer
         .create_elicitation_with_timeout(
@@ -1052,7 +1091,12 @@ async fn elicit_approval(
         .await
         .map_err(ElicitationError::Service)
         .and_then(parse_approval_response);
-    interpret_approval(response)
+    let elapsed = sent_at.elapsed();
+    if matches!(&response, Err(ElicitationError::Service(_))) {
+        interpret_approval(response)
+    } else {
+        check_response_time(interpret_approval(response), elapsed)
+    }
 }
 
 #[tool_router]
@@ -1740,6 +1784,8 @@ async fn main() -> ExitCode {
         previews: Arc::new(Previews::default()),
         pending_confirmations: Arc::new(PendingConfirmations::default()),
         trust_client_approval,
+        desktop_code_tab: std::env::var("CLAUDE_CODE_DESKTOP_APP_VERSION")
+            .is_ok_and(|version| !version.is_empty()),
         confirmation_timeout: if cfg!(debug_assertions) {
             std::env::var("GITCONTEXT_TEST_CONFIRMATION_TIMEOUT_MS")
                 .ok()
@@ -1796,10 +1842,10 @@ mod remote_tests {
             for supports in [false, true] {
                 for unreliable in [false, true] {
                     let actual = confirmation_method(trust, supports, unreliable);
-                    if trust {
-                        assert_eq!(actual, Ok(Confirmation::Client));
-                    } else if supports && !unreliable {
+                    if supports && !unreliable {
                         assert_eq!(actual, Ok(Confirmation::Elicitation));
+                    } else if trust {
+                        assert_eq!(actual, Ok(Confirmation::Client));
                     } else {
                         assert!(actual.is_err());
                     }
