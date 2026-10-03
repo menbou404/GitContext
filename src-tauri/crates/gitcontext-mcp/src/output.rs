@@ -29,6 +29,7 @@ pub struct ProfileDto<'a> {
     git_name: &'a str,
     git_email: &'a str,
     github_username: &'a Option<String>,
+    auto_approve: &'a gitcontext_core::models::ProfileAutoApprove,
     ssh_key: SshKeyDto,
     #[serde(skip_serializing_if = "Option::is_none")]
     github: Option<GithubDto>,
@@ -42,6 +43,7 @@ impl<'a> ProfileDto<'a> {
             git_name: &profile.git_name,
             git_email: &profile.git_email,
             github_username: &profile.github_username,
+            auto_approve: &profile.auto_approve,
             ssh_key: SshKeyDto {
                 configured: profile.ssh_key_path.is_some(),
                 file_name: profile.ssh_key_path.as_deref().and_then(file_name),
@@ -168,6 +170,7 @@ mod tests {
             github_username: Some("fictional".into()),
             ssh_key_path: Some("C:\\Fictional\\.ssh\\id_example".into()),
             gh_config_dir: Some("C:\\Fictional\\gh-private".into()),
+            auto_approve: Default::default(),
         };
         let profile_json = serde_json::to_string(&ProfileDto::new(&profile, None)).unwrap();
         assert!(profile_json.contains("id_example"));

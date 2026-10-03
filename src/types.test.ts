@@ -8,6 +8,7 @@ const profile: Profile = {
   accent: "#d8a33f",
   gitName: "Your Name",
   gitEmail: "you@example.com",
+  autoApprove: { cloneRepository: false },
 };
 
 describe("profile helpers", () => {

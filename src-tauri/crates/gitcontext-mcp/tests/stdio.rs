@@ -550,6 +550,36 @@ fn set_auto_approve(data_dir: &Path, push: bool, pull_request: bool) {
     fs::write(path, state.to_string()).unwrap();
 }
 
+fn set_repository_approval(data_dir: &Path, field: &str, enabled: bool) {
+    let path = data_dir.join("state.json");
+    let mut state: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    state["repositories"][0]["autoApprove"][field] = json!(enabled);
+    fs::write(path, state.to_string()).unwrap();
+}
+
+fn set_profile_clone_approval(data_dir: &Path, enabled: bool) {
+    let path = data_dir.join("state.json");
+    let mut state: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    state["profiles"][0]["autoApprove"] = json!({"cloneRepository": enabled});
+    fs::write(path, state.to_string()).unwrap();
+}
+
+fn assert_remote_approval(result: &Value, approved: bool, data_dir: &Path) {
+    if approved {
+        assert_eq!(result["isError"], true, "{result}");
+        assert!(
+            result["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("Test stopped before"),
+            "{result}"
+        );
+        assert_eq!(last_audit(data_dir)["confirmation"], "auto");
+    } else {
+        assert_eq!(result["resultType"], "input_required", "{result}");
+    }
+}
+
 fn install_gh_stub(fixture: &Fixture, data_dir: &Path, default_branch: Option<&str>) {
     let bin = fixture.root.join("bin");
     let gh_dir = fixture.root.join("gh-config");
@@ -647,6 +677,180 @@ fn auto_push_default_branch_and_failed_lookup_require_confirmation() {
 }
 
 #[test]
+fn push_approval_uses_only_the_matching_branch_setting() {
+    for (working, work_enabled, default_enabled) in [
+        (true, false, false),
+        (true, true, false),
+        (true, false, true),
+        (true, true, true),
+        (false, false, false),
+        (false, true, false),
+        (false, false, true),
+        (false, true, true),
+    ] {
+        let fixture = Fixture::new();
+        let (repo, data_dir) = push_fixture(&fixture);
+        if working {
+            git(&repo, &["switch", "-c", "work"]);
+        }
+        install_gh_stub(&fixture, &data_dir, Some("MaIn"));
+        set_repository_approval(&data_dir, "pushWorkBranch", work_enabled);
+        set_repository_approval(&data_dir, "pushDefaultBranch", default_enabled);
+        let mut rpc = Rpc::start_tier(&data_dir, "remote");
+        initialize(&mut rpc);
+        let id = applied_push_preview(&mut rpc);
+        let status = rpc.call(5, "get_repository_status", json!({"repositoryId":"repo-1"}));
+        assert_eq!(
+            status["structuredContent"]["autoApprove"]["pushDefaultBranch"],
+            default_enabled
+        );
+        let approved = if working {
+            work_enabled
+        } else {
+            default_enabled
+        };
+        let capabilities = if approved {
+            json!({})
+        } else {
+            json!({"elicitation":{"form":{}}})
+        };
+        let result = rpc.modern_call(6, "push", json!({"previewId":id}), capabilities);
+        assert_remote_approval(&result, approved, &data_dir);
+    }
+}
+
+#[test]
+fn failed_default_branch_lookup_never_auto_approves_push() {
+    for working in [false, true] {
+        let fixture = Fixture::new();
+        let (repo, data_dir) = push_fixture(&fixture);
+        if working {
+            git(&repo, &["switch", "-c", "work"]);
+        }
+        install_gh_stub(&fixture, &data_dir, None);
+        set_repository_approval(&data_dir, "pushWorkBranch", true);
+        set_repository_approval(&data_dir, "pushDefaultBranch", true);
+        let mut rpc = Rpc::start_tier(&data_dir, "remote");
+        initialize(&mut rpc);
+        let id = applied_push_preview(&mut rpc);
+        let result = rpc.modern_call(
+            5,
+            "push",
+            json!({"previewId":id}),
+            json!({"elicitation":{"form":{}}}),
+        );
+        assert_remote_approval(&result, false, &data_dir);
+    }
+}
+
+#[test]
+fn clone_approval_comes_from_the_preview_profile_without_a_repository() {
+    for approved in [false, true] {
+        let fixture = Fixture::new();
+        let (_, data_dir) = push_fixture(&fixture);
+        set_profile_clone_approval(&data_dir, approved);
+        let mut rpc = Rpc::start_tier(&data_dir, "remote");
+        initialize(&mut rpc);
+        let profiles = rpc.call(2, "list_profiles", json!({}));
+        assert_eq!(
+            profiles["structuredContent"]["profiles"][0]["autoApprove"]["cloneRepository"],
+            approved,
+            "{profiles}"
+        );
+        let preview = rpc.call(3, "preview_clone", json!({"profileId":"fictional","sshUrl":"git@github.com:fictional/new-repo.git","destinationParent":fixture.root}));
+        assert_eq!(preview["isError"], false, "{preview}");
+        let id = preview["structuredContent"]["previewId"].as_str().unwrap();
+        let capabilities = if approved {
+            json!({})
+        } else {
+            json!({"elicitation":{"form":{}}})
+        };
+        let result = rpc.modern_call(4, "clone_repository", json!({"previewId":id}), capabilities);
+        assert_remote_approval(&result, approved, &data_dir);
+    }
+}
+
+#[test]
+fn merge_approval_is_independent_of_other_repository_settings() {
+    for approved in [false, true] {
+        let fixture = Fixture::new();
+        let (_, data_dir) = push_fixture(&fixture);
+        install_gh_stub(&fixture, &data_dir, Some("main"));
+        set_repository_approval(&data_dir, "mergePullRequest", approved);
+        let mut rpc = Rpc::start_tier(&data_dir, "remote");
+        initialize(&mut rpc);
+        let _ = applied_push_preview(&mut rpc);
+        let preview = rpc.call(
+            5,
+            "preview_merge",
+            json!({"repositoryId":"repo-1","number":1}),
+        );
+        assert_eq!(preview["isError"], false, "{preview}");
+        let id = preview["structuredContent"]["previewId"].as_str().unwrap();
+        let capabilities = if approved {
+            json!({})
+        } else {
+            json!({"elicitation":{"form":{}}})
+        };
+        let result = rpc.modern_call(
+            6,
+            "merge_pull_request",
+            json!({"previewId":id,"strategy":"merge"}),
+            capabilities,
+        );
+        assert_remote_approval(&result, approved, &data_dir);
+    }
+}
+
+#[test]
+fn publish_approval_uses_registered_repository_setting() {
+    for approved in [false, true] {
+        let fixture = Fixture::new();
+        let (repo, data_dir) = local_fixture(&fixture);
+        git(&repo, &["config", "user.name", "Sample Person"]);
+        git(&repo, &["config", "user.email", "sample@example.com"]);
+        fs::write(repo.join("readme.txt"), "fixture").unwrap();
+        git(&repo, &["add", "readme.txt"]);
+        git(&repo, &["commit", "-m", "Initial fixture"]);
+        install_gh_stub(&fixture, &data_dir, Some("main"));
+        set_repository_approval(&data_dir, "publishRepository", approved);
+        let mut rpc = Rpc::start_tier(&data_dir, "remote");
+        initialize(&mut rpc);
+        let assignment = rpc.call(
+            2,
+            "preview_assignment",
+            json!({"repositoryId":"repo-1","profileId":"fictional"}),
+        );
+        let assignment_id = assignment["structuredContent"]["previewId"]
+            .as_str()
+            .unwrap();
+        assert_eq!(
+            rpc.call(3, "apply_profile", json!({"previewId":assignment_id}))["isError"],
+            false
+        );
+        let preview = rpc.call(
+            4,
+            "preview_publish",
+            json!({"repositoryId":"repo-1","name":"published-repo","visibility":"private"}),
+        );
+        assert_eq!(preview["isError"], false, "{preview}");
+        let id = preview["structuredContent"]["previewId"].as_str().unwrap();
+        let capabilities = if approved {
+            json!({})
+        } else {
+            json!({"elicitation":{"form":{}}})
+        };
+        let result = rpc.modern_call(
+            5,
+            "publish_repository",
+            json!({"previewId":id}),
+            capabilities,
+        );
+        assert_remote_approval(&result, approved, &data_dir);
+    }
+}
+
+#[test]
 fn auto_push_setting_is_reloaded_after_preview() {
     let fixture = Fixture::new();
     let (repo, data_dir) = push_fixture(&fixture);
@@ -707,6 +911,22 @@ fn auto_create_pull_request_skips_confirmation_but_merge_does_not() {
         .unwrap()
         .contains("Test stopped before"));
     assert_eq!(last_audit(&data_dir)["confirmation"], "auto");
+    set_repository_approval(&data_dir, "createPullRequest", false);
+    let second_preview = rpc.call(8, "preview_pull_request", json!({"repositoryId":"repo-1"}));
+    assert_eq!(second_preview["isError"], false, "{second_preview}");
+    let second_id = second_preview["structuredContent"]["previewId"]
+        .as_str()
+        .unwrap();
+    let second_result = rpc.modern_call(
+        9,
+        "create_pull_request",
+        json!({"previewId":second_id,"title":"Fixture PR","body":"","draft":false}),
+        json!({"elicitation":{"form":{}}}),
+    );
+    assert_eq!(
+        second_result["resultType"], "input_required",
+        "{second_result}"
+    );
     let merge = rpc.call(
         6,
         "preview_merge",
@@ -738,6 +958,7 @@ fn remote_tier_exposes_only_remote_operations() {
             .map(|tool| tool["name"].as_str().unwrap())
             .collect();
         assert!(!names.contains(&"set_repository_auto_approve"));
+        assert!(!names.contains(&"set_profile_auto_approve"));
         for name in [
             "preview_merge",
             "preview_clone",

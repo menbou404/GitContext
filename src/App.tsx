@@ -28,6 +28,7 @@ import {
   pushRepository,
   removeRepository,
   saveProfile,
+  setProfileAutoApprove,
   setRepositoryAutoApprove,
 } from "./backend";
 import {
@@ -62,6 +63,7 @@ const emptyProfile = (): Profile => ({
   githubUsername: "",
   sshKeyPath: "",
   ghConfigDir: "",
+  autoApprove: { cloneRepository: false },
 });
 
 interface EditingProfile {
@@ -119,6 +121,7 @@ function ProfileEditor({
   locale,
   onClose,
   onSave,
+  onAutoApprove,
 }: {
   initial: Profile;
   creating: boolean;
@@ -126,10 +129,12 @@ function ProfileEditor({
   locale: Locale;
   onClose: () => void;
   onSave: (profile: Profile) => Promise<void>;
+  onAutoApprove: (profileId: string, enabled: boolean) => Promise<void>;
 }) {
   const copy = uiCopy[locale];
   const [draft, setDraft] = useState(initial);
   const [saving, setSaving] = useState(false);
+  const [autoApproveSaving, setAutoApproveSaving] = useState(false);
   const [linking, setLinking] = useState(false);
   const [checking, setChecking] = useState(false);
   const [ghStatus, setGhStatus] = useState<GhProfileStatus | null>(null);
@@ -249,6 +254,19 @@ function ProfileEditor({
     }
   };
 
+  const updateCloneApproval = async (enabled: boolean) => {
+    setError(null);
+    setAutoApproveSaving(true);
+    try {
+      await onAutoApprove(draft.id, enabled);
+      setDraft((current) => ({ ...current, autoApprove: { cloneRepository: enabled } }));
+    } catch (cause) {
+      setError(messageFrom(cause, locale));
+    } finally {
+      setAutoApproveSaving(false);
+    }
+  };
+
   return (
     <div className="modal-layer" role="presentation" onMouseDown={onClose}>
       <form className="modal profile-modal" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}>
@@ -345,6 +363,11 @@ function ProfileEditor({
             </div>
           </label>
         </section>
+
+        {!creating && <fieldset className="auto-approve-settings" disabled={autoApproveSaving}>
+          <legend>{copy.autoApproveTitle}</legend>
+          <label><input type="checkbox" checked={draft.autoApprove.cloneRepository} onChange={(event) => updateCloneApproval(event.currentTarget.checked)} />{copy.autoApproveClone}</label>
+        </fieldset>}
 
         <div className="privacy-note">
           <ShieldIcon />
@@ -1282,6 +1305,7 @@ function App({ locale = "en" }: { locale?: Locale }) {
   const [pullRequestPreview, setPullRequestPreview] = useState<PullRequestPreview | null>(null);
   const [pullRequestManagement, setPullRequestManagement] = useState<PullRequestManagement | null>(null);
   const [busy, setBusy] = useState(false);
+  const [removeConfirmingId, setRemoveConfirmingId] = useState<string | null>(null);
 
   useEffect(() => {
     document.documentElement.lang = locale;
@@ -1319,6 +1343,7 @@ function App({ locale = "en" }: { locale?: Locale }) {
   const selectRepository = (id: string) => {
     const repository = data?.repositories.find((repo) => repo.id === id);
     setSelectedRepositoryId(id);
+    setRemoveConfirmingId(null);
     setPendingProfileId(repository?.profileId ?? data?.profiles[0]?.id ?? "");
   };
 
@@ -1347,9 +1372,13 @@ function App({ locale = "en" }: { locale?: Locale }) {
     setNotice(copy.profileSaved(profile.label));
   };
 
+  const updateProfileAutoApprove = async (profileId: string, enabled: boolean) => {
+    const nextData = await setProfileAutoApprove(profileId, { cloneRepository: enabled });
+    updateData(nextData);
+  };
+
   const updateAutoApprove = async (field: keyof AutoApprove, enabled: boolean) => {
     if (!selectedRepository || busy) return;
-    if (enabled && !window.confirm(copy.autoApproveConfirm)) return;
     setBusy(true);
     setNotice(null);
     try {
@@ -1587,7 +1616,7 @@ function App({ locale = "en" }: { locale?: Locale }) {
   };
 
   const removeSelected = async () => {
-    if (!selectedRepository || !window.confirm(copy.removeConfirm(selectedRepository.name))) return;
+    if (!selectedRepository || removeConfirmingId !== selectedRepository.id) return;
     try {
       const nextData = await removeRepository(selectedRepository.id);
       updateData(nextData);
@@ -1595,6 +1624,7 @@ function App({ locale = "en" }: { locale?: Locale }) {
       setSelectedRepositoryId(nextSelected?.id ?? null);
       setPendingProfileId(nextSelected?.profileId ?? nextData.profiles[0]?.id ?? "");
       setNotice(copy.repositoryRemoved);
+      setRemoveConfirmingId(null);
     } catch (error) {
       setNotice(messageFrom(error, locale));
     }
@@ -1766,7 +1796,10 @@ function App({ locale = "en" }: { locale?: Locale }) {
                 <fieldset className="auto-approve-settings" disabled={busy}>
                   <legend>{copy.autoApproveTitle}</legend>
                   <label><input type="checkbox" checked={selectedRepository.autoApprove.pushWorkBranch} onChange={(event) => updateAutoApprove("pushWorkBranch", event.currentTarget.checked)} />{copy.autoApprovePush}</label>
+                  <label><input type="checkbox" checked={selectedRepository.autoApprove.pushDefaultBranch} onChange={(event) => updateAutoApprove("pushDefaultBranch", event.currentTarget.checked)} />{copy.autoApproveDefaultPush}<span className="auto-approve-risk">{copy.autoApproveDefaultPushRisk}</span></label>
                   <label><input type="checkbox" checked={selectedRepository.autoApprove.createPullRequest} onChange={(event) => updateAutoApprove("createPullRequest", event.currentTarget.checked)} />{copy.autoApprovePullRequest}</label>
+                  <label><input type="checkbox" checked={selectedRepository.autoApprove.mergePullRequest} onChange={(event) => updateAutoApprove("mergePullRequest", event.currentTarget.checked)} />{copy.autoApproveMerge}<span className="auto-approve-risk">{copy.autoApproveMergeRisk}</span></label>
+                  <label><input type="checkbox" checked={selectedRepository.autoApprove.publishRepository} onChange={(event) => updateAutoApprove("publishRepository", event.currentTarget.checked)} />{copy.autoApprovePublish}<span className="auto-approve-risk">{copy.autoApprovePublishRisk}</span></label>
                 </fieldset>
 
                 <button className="button button--primary button--wide" disabled={!pendingProfile || !profileIsComplete(pendingProfile) || busy} onClick={reviewAssignment}>{copy.reviewAndApply}</button>
@@ -1785,14 +1818,18 @@ function App({ locale = "en" }: { locale?: Locale }) {
                     <button className="button button--publish button--wide" disabled={!assignedProfile?.githubUsername || !assignedProfile.ghConfigDir || !selectedRepository.lastAppliedAt || busy} onClick={() => assignedProfile && setPublishTarget({ repository: selectedRepository, profile: assignedProfile })}><TerminalIcon />{copy.publishToGithub}</button>
                   </>
                 )}
-                <button className="danger-link" onClick={removeSelected}><TrashIcon />{copy.removeFromGitContext}</button>
+                {removeConfirmingId === selectedRepository.id ? <div className="remove-confirmation">
+                  <p>{copy.removeConfirm(selectedRepository.name)}</p>
+                  <button className="button button--danger" onClick={removeSelected}><TrashIcon />{copy.removeAction}</button>
+                  <button className="button button--ghost" onClick={() => setRemoveConfirmingId(null)}>{copy.removeCancel}</button>
+                </div> : <button className="danger-link" onClick={() => setRemoveConfirmingId(selectedRepository.id)}><TrashIcon />{copy.removeFromGitContext}</button>}
               </aside>
             )}
           </div>
         </main>
       </div>
 
-      {editingProfile && <ProfileEditor initial={editingProfile.profile} creating={editingProfile.creating} ghAvailable={environment.gh.available} locale={locale} onClose={() => setEditingProfile(null)} onSave={saveProfileAction} />}
+      {editingProfile && <ProfileEditor initial={editingProfile.profile} creating={editingProfile.creating} ghAvailable={environment.gh.available} locale={locale} onClose={() => setEditingProfile(null)} onSave={saveProfileAction} onAutoApprove={updateProfileAutoApprove} />}
       {cloneOpen && <CloneDialog profiles={data.profiles} locale={locale} onClose={() => setCloneOpen(false)} onClone={cloneRepositoryAction} />}
       {preview && <ApplyDialog preview={preview} locale={locale} onClose={() => setPreview(null)} onApply={applyProfileAction} />}
       {publishTarget && <PublishDialog repository={publishTarget.repository} profile={publishTarget.profile} locale={locale} onClose={() => setPublishTarget(null)} onPublish={publishRepositoryAction} />}

@@ -5,8 +5,9 @@ use crate::{
     models::{
         normalize_profile, validate_profile, AppData, ApplyPreview, AutoApprove, BootstrapResult,
         BranchResult, CloneResult, CommitPreview, CommitResult, GhProfileStatus, GithubRepository,
-        MergePullRequestResult, Profile, PublishResult, PullRequestManagement, PullRequestPreview,
-        PullRequestResult, PushPreview, PushResult, RepositoryRecord, SyncPreview,
+        MergePullRequestResult, Profile, ProfileAutoApprove, PublishResult, PullRequestManagement,
+        PullRequestPreview, PullRequestResult, PushPreview, PushResult, RepositoryRecord,
+        SyncPreview,
     },
     storage::{development_data, StateStore},
 };
@@ -41,6 +42,7 @@ pub fn save_profile(store: &StateStore, profile: Profile) -> Result<AppData, Str
 
     let mut data = store.load()?;
     if let Some(existing) = data.profiles.iter_mut().find(|item| item.id == profile.id) {
+        profile.auto_approve = existing.auto_approve.clone();
         *existing = profile;
     } else {
         data.profiles.push(profile);
@@ -163,6 +165,23 @@ pub fn set_repository_auto_approve(
         .find(|item| item.id == repository_id)
         .ok_or_else(|| "Repository was not found.".to_string())?;
     repository.auto_approve = auto_approve;
+    store.save(&data)?;
+    Ok(data)
+}
+
+pub fn set_profile_auto_approve(
+    store: &StateStore,
+    profile_id: String,
+    auto_approve: ProfileAutoApprove,
+) -> Result<AppData, String> {
+    let _guard = store.lock()?;
+    let mut data = store.load()?;
+    let profile = data
+        .profiles
+        .iter_mut()
+        .find(|item| item.id == profile_id)
+        .ok_or_else(|| "Profile was not found.".to_string())?;
+    profile.auto_approve = auto_approve;
     store.save(&data)?;
     Ok(data)
 }
@@ -1073,6 +1092,7 @@ mod auto_approve_tests {
             AutoApprove {
                 push_work_branch: true,
                 create_pull_request: true,
+                ..Default::default()
             },
         )
         .unwrap();
@@ -1089,8 +1109,27 @@ mod auto_approve_tests {
             github_username: None,
             ssh_key_path: None,
             gh_config_dir: None,
+            auto_approve: ProfileAutoApprove::default(),
         };
         save_profile(&store, profile).unwrap();
+        let approved = set_profile_auto_approve(
+            &store,
+            "sample".into(),
+            ProfileAutoApprove {
+                clone_repository: true,
+            },
+        )
+        .unwrap();
+        assert!(approved.profiles[0].auto_approve.clone_repository);
+        let mut edited = approved.profiles[0].clone();
+        edited.label = "Edited".into();
+        edited.auto_approve = ProfileAutoApprove::default();
+        let saved = save_profile(&store, edited).unwrap();
+        assert!(saved.profiles[0].auto_approve.clone_repository);
+        assert!(
+            set_profile_auto_approve(&store, "missing".into(), ProfileAutoApprove::default())
+                .is_err()
+        );
         let applied = apply_profile(&store, record.id.clone(), "sample".into()).unwrap();
         assert!(applied.repositories[0].auto_approve.push_work_branch);
         fs::write(repo.join("readme.txt"), "fixture").unwrap();

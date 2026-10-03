@@ -7,6 +7,11 @@ export interface Profile {
   githubUsername?: string | null;
   sshKeyPath?: string | null;
   ghConfigDir?: string | null;
+  autoApprove: ProfileAutoApprove;
+}
+
+export interface ProfileAutoApprove {
+  cloneRepository: boolean;
 }
 
 export interface RepositoryRecord {
@@ -22,7 +27,10 @@ export interface RepositoryRecord {
 
 export interface AutoApprove {
   pushWorkBranch: boolean;
+  pushDefaultBranch: boolean;
   createPullRequest: boolean;
+  mergePullRequest: boolean;
+  publishRepository: boolean;
 }
 
 export interface AppData {

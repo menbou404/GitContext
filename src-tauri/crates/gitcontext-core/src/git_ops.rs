@@ -995,6 +995,7 @@ mod tests {
             github_username: None,
             ssh_key_path: None,
             gh_config_dir: None,
+            auto_approve: Default::default(),
         };
         (root, repository, profile)
     }
@@ -1290,6 +1291,7 @@ mod tests {
             github_username: None,
             ssh_key_path: None,
             gh_config_dir: None,
+            auto_approve: Default::default(),
         };
 
         let preview = build_commit_preview(&repository, &profile).unwrap();

@@ -6,8 +6,13 @@ describe("Japanese UI copy", () => {
     expect(uiCopy.ja.autoApproveTitle).toBe("AIによる操作の自動承認");
     expect(uiCopy.ja.autoApprovePush).toBe("作業ブランチへのpush");
     expect(uiCopy.ja.autoApprovePullRequest).toBe("Pull Requestの作成");
-    expect(uiCopy.ja.autoApproveConfirm).toContain("mergeと既定ブランチへのpushは、常に確認します。");
-    expect(uiCopy.en.autoApproveConfirm).toContain("default branch");
+    expect(uiCopy.ja.autoApproveDefaultPush).toBe("既定ブランチへのpush");
+    expect(uiCopy.ja.autoApproveMerge).toBe("Pull Requestのmerge");
+    expect(uiCopy.ja.autoApprovePublish).toBe("GitHubへの公開");
+    expect(uiCopy.ja.autoApproveClone).toBe("このプロファイルでのclone");
+    expect(uiCopy.en.autoApproveDefaultPushRisk).toContain("without confirmation");
+    expect(uiCopy.en.autoApproveMergeRisk).toContain("without confirmation");
+    expect(uiCopy.en.autoApprovePublishRisk).toContain("without confirmation");
   });
 
   it("provides localized labels and dynamic notices", () => {

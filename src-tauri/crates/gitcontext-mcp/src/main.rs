@@ -686,6 +686,13 @@ impl GitContextServer {
             let entry_for_approval = entry.clone();
             tokio::task::spawn_blocking(move || {
                 let data = load(&store_for_approval).ok()?;
+                if matches!(&entry_for_approval.fingerprint, Fingerprint::Clone { .. }) {
+                    return data
+                        .profiles
+                        .iter()
+                        .find(|profile| profile.id == entry_for_approval.profile_id)
+                        .map(|profile| profile.auto_approve.clone_repository);
+                }
                 let repository = data
                     .repositories
                     .iter()
@@ -695,20 +702,24 @@ impl GitContextServer {
                     return None;
                 }
                 match &entry_for_approval.fingerprint {
-                    Fingerprint::Push { branch, .. }
-                        if repository.auto_approve.push_work_branch =>
-                    {
+                    Fingerprint::Push { branch, .. } => {
                         let default_branch = operations::repository_default_branch(
                             &store_for_approval,
                             &entry_for_approval.repository_id,
                             &entry_for_approval.profile_id,
                         )
                         .ok()?;
-                        Some(!branch.eq_ignore_ascii_case(&default_branch))
+                        Some(if branch.eq_ignore_ascii_case(&default_branch) {
+                            repository.auto_approve.push_default_branch
+                        } else {
+                            repository.auto_approve.push_work_branch
+                        })
                     }
                     Fingerprint::CreatePullRequest { .. } => {
                         Some(repository.auto_approve.create_pull_request)
                     }
+                    Fingerprint::Merge { .. } => Some(repository.auto_approve.merge_pull_request),
+                    Fingerprint::Publish { .. } => Some(repository.auto_approve.publish_repository),
                     _ => None,
                 }
             })
@@ -1037,8 +1048,11 @@ impl GitContextServer {
                 }
                 if confirmation == Some("auto") {
                     value["approval"] = json!("auto");
-                    value["approvalNote"] =
-                        json!("Approved automatically by this repository's GitContext setting.");
+                    value["approvalNote"] = json!(if name == "clone_repository" {
+                        "Approved automatically by this profile's GitContext setting."
+                    } else {
+                        "Approved automatically by this repository's GitContext setting."
+                    });
                 }
                 if let Some(warning) = warning {
                     value["warning"] = json!(warning);
@@ -1048,9 +1062,11 @@ impl GitContextServer {
             Err(error) => {
                 let mut error = local_error(error, &self.store);
                 if confirmation == Some("auto") {
-                    error.push_str(
-                        " Approved automatically by this repository's GitContext setting.",
-                    );
+                    error.push_str(if name == "clone_repository" {
+                        " Approved automatically by this profile's GitContext setting."
+                    } else {
+                        " Approved automatically by this repository's GitContext setting."
+                    });
                 }
                 if let Some(warning) = warning {
                     error.push(' ');

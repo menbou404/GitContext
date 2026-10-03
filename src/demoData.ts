@@ -25,6 +25,7 @@ export const demoBootstrap: BootstrapResult = {
         githubUsername: "your-personal",
         sshKeyPath: "C:\\Users\\you\\.ssh\\id_ed25519_oss",
         ghConfigDir: "C:\\Users\\you\\.config\\gh-open-source",
+        autoApprove: { cloneRepository: false },
       },
       {
         id: "university-lab",
@@ -35,6 +36,7 @@ export const demoBootstrap: BootstrapResult = {
         githubUsername: "your-school",
         sshKeyPath: "C:\\Users\\you\\.ssh\\id_ed25519_lab",
         ghConfigDir: "C:\\Users\\you\\.config\\gh-university-lab",
+        autoApprove: { cloneRepository: false },
       },
     ],
     repositories: [
@@ -46,7 +48,7 @@ export const demoBootstrap: BootstrapResult = {
         branch: "main",
         profileId: "open-source",
         lastAppliedAt: "2026-08-26T00:20:00Z",
-        autoApprove: { pushWorkBranch: false, createPullRequest: false },
+        autoApprove: { pushWorkBranch: false, pushDefaultBranch: false, createPullRequest: false, mergePullRequest: false, publishRepository: false },
       },
       {
         id: "repo-school",
@@ -56,7 +58,7 @@ export const demoBootstrap: BootstrapResult = {
         branch: "main",
         profileId: "university-lab",
         lastAppliedAt: "2026-08-25T11:05:00Z",
-        autoApprove: { pushWorkBranch: false, createPullRequest: false },
+        autoApprove: { pushWorkBranch: false, pushDefaultBranch: false, createPullRequest: false, mergePullRequest: false, publishRepository: false },
       },
       {
         id: "repo-unassigned",
@@ -66,7 +68,7 @@ export const demoBootstrap: BootstrapResult = {
         branch: "develop",
         profileId: null,
         lastAppliedAt: null,
-        autoApprove: { pushWorkBranch: false, createPullRequest: false },
+        autoApprove: { pushWorkBranch: false, pushDefaultBranch: false, createPullRequest: false, mergePullRequest: false, publishRepository: false },
       },
     ],
   },

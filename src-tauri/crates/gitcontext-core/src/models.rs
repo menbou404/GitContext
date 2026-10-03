@@ -14,6 +14,15 @@ pub struct Profile {
     pub ssh_key_path: Option<String>,
     #[serde(default)]
     pub gh_config_dir: Option<String>,
+    #[serde(default)]
+    pub auto_approve: ProfileAutoApprove,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileAutoApprove {
+    #[serde(default)]
+    pub clone_repository: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -22,7 +31,13 @@ pub struct AutoApprove {
     #[serde(default)]
     pub push_work_branch: bool,
     #[serde(default)]
+    pub push_default_branch: bool,
+    #[serde(default)]
     pub create_pull_request: bool,
+    #[serde(default)]
+    pub merge_pull_request: bool,
+    #[serde(default)]
+    pub publish_repository: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -62,10 +77,19 @@ mod auto_approve_tests {
         let data: AppData = serde_json::from_str(old).unwrap();
         assert!(!data.repositories[0].auto_approve.push_work_branch);
         assert!(!data.repositories[0].auto_approve.create_pull_request);
+        assert!(!data.repositories[0].auto_approve.push_default_branch);
+        assert!(!data.repositories[0].auto_approve.merge_pull_request);
+        assert!(!data.repositories[0].auto_approve.publish_repository);
         let partial = r#"{"version":2,"profiles":[],"repositories":[{"id":"r","name":"r","path":"r","autoApprove":{"pushWorkBranch":true}}]}"#;
         let data: AppData = serde_json::from_str(partial).unwrap();
         assert!(data.repositories[0].auto_approve.push_work_branch);
         assert!(!data.repositories[0].auto_approve.create_pull_request);
+        assert!(!data.repositories[0].auto_approve.push_default_branch);
+        assert!(!data.repositories[0].auto_approve.merge_pull_request);
+        assert!(!data.repositories[0].auto_approve.publish_repository);
+        let old_profile = r##"{"version":2,"profiles":[{"id":"p","label":"P","accent":"#112233","gitName":"Test","gitEmail":"test@example.com"}],"repositories":[]}"##;
+        let profiles: AppData = serde_json::from_str(old_profile).unwrap();
+        assert!(!profiles.profiles[0].auto_approve.clone_repository);
         let saved = serde_json::to_value(data).unwrap();
         assert_eq!(
             saved["repositories"][0]["autoApprove"]["pushWorkBranch"],
@@ -443,6 +467,7 @@ mod tests {
             github_username: Some("  user  ".into()),
             ssh_key_path: Some(String::new()),
             gh_config_dir: None,
+            auto_approve: ProfileAutoApprove::default(),
         }
     }
 
@@ -475,6 +500,7 @@ mod tests {
                     github_username: None,
                     ssh_key_path: None,
                     gh_config_dir: None,
+                    auto_approve: ProfileAutoApprove::default(),
                 },
                 valid_profile(),
             ],
