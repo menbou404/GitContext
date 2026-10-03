@@ -1,6 +1,6 @@
 mod commands;
 
-use gitcontext_core::storage::{build_config_dir, StateStore};
+use gitcontext_core::storage::open_default_store;
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -8,10 +8,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            let config_dir = app.path().app_config_dir().map_err(|error| {
-                format!("Could not resolve GitContext's settings directory: {error}")
-            })?;
-            app.manage(StateStore::new(build_config_dir(config_dir)?));
+            app.manage(open_default_store()?);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

@@ -125,6 +125,30 @@ impl Rpc {
             json!({ "name": name, "arguments": arguments }),
         )
     }
+
+    fn modern_request(
+        &mut self,
+        id: u32,
+        method: &str,
+        mut params: Value,
+        capabilities: Value,
+    ) -> Value {
+        params["_meta"] = json!({
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+            "io.modelcontextprotocol/clientInfo": {"name": "modern-test", "version": "1"},
+            "io.modelcontextprotocol/clientCapabilities": capabilities
+        });
+        self.request(id, method, params)
+    }
+
+    fn modern_call(&mut self, id: u32, name: &str, arguments: Value, capabilities: Value) -> Value {
+        self.modern_request(
+            id,
+            "tools/call",
+            json!({"name": name, "arguments": arguments}),
+            capabilities,
+        )
+    }
 }
 
 fn initialize(rpc: &mut Rpc) {
@@ -614,6 +638,333 @@ fn remote_without_elicitation_is_rejected_and_audited() {
     assert_eq!(last["tool"], "push");
     assert_eq!(last["outcome"], "rejected");
     assert!(last["confirmation"].is_null());
+}
+
+#[test]
+fn modern_requests_use_per_request_elicitation_capability() {
+    for supports_form in [true, false] {
+        let fixture = Fixture::new();
+        let (_, data_dir) = push_fixture(&fixture);
+        let mut rpc = Rpc::start_tier(&data_dir, "remote");
+        let capabilities = if supports_form {
+            json!({"elicitation":{"form":{}}})
+        } else {
+            json!({})
+        };
+        let discovered = rpc.modern_request(1, "server/discover", json!({}), capabilities.clone());
+        assert_eq!(
+            discovered["_meta"]["io.modelcontextprotocol/serverInfo"]["name"],
+            "rmcp"
+        );
+        let tools = rpc.modern_request(2, "tools/list", json!({}), capabilities.clone());
+        assert!(tools["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|tool| tool["name"] == "push"));
+        let assignment = rpc.modern_call(
+            3,
+            "preview_assignment",
+            json!({"repositoryId":"repo-1","profileId":"fictional"}),
+            capabilities.clone(),
+        );
+        let assignment_id = assignment["structuredContent"]["previewId"]
+            .as_str()
+            .unwrap();
+        let applied = rpc.modern_call(
+            4,
+            "apply_profile",
+            json!({"previewId":assignment_id}),
+            capabilities.clone(),
+        );
+        assert_eq!(applied["isError"], false, "{applied}");
+        let preview = rpc.modern_call(
+            5,
+            "preview_push",
+            json!({"repositoryId":"repo-1"}),
+            capabilities.clone(),
+        );
+        let preview_id = preview["structuredContent"]["previewId"].as_str().unwrap();
+        let first = rpc.modern_call(
+            6,
+            "push",
+            json!({"previewId":preview_id}),
+            capabilities.clone(),
+        );
+        if supports_form {
+            assert_eq!(first["resultType"], "input_required", "{first}");
+            assert_eq!(
+                first["inputRequests"]["approval"]["method"],
+                "elicitation/create"
+            );
+            assert_eq!(
+                first["inputRequests"]["approval"]["params"]["requestedSchema"]["properties"]
+                    ["approved"]["type"],
+                "boolean"
+            );
+            assert!(
+                first["inputRequests"]["approval"]["params"]["requestedSchema"]["required"]
+                    .as_array()
+                    .unwrap()
+                    .contains(&json!("approved"))
+            );
+            assert!(first["inputRequests"]["approval"]["params"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("Profile: Fictional"));
+            let state = first["requestState"].as_str().unwrap();
+            assert_eq!(uuid_version(state), Some('4'));
+            let response = rpc.modern_request(7, "tools/call", json!({"name":"push","arguments":{"previewId":preview_id},"requestState":state,"inputResponses":{"approval":{"action":"decline"}}}), capabilities);
+            assert_eq!(response["isError"], true, "{response}");
+        } else {
+            assert!(first["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("cannot show GitContext's confirmation prompt"));
+        }
+        let audit = fs::read_to_string(data_dir.join("mcp-audit.jsonl")).unwrap();
+        let last: Value = serde_json::from_str(audit.lines().last().unwrap()).unwrap();
+        assert_eq!(last["client"], "modern-test");
+        assert_eq!(
+            last["confirmation"],
+            if supports_form {
+                json!("elicitation")
+            } else {
+                json!(null)
+            }
+        );
+    }
+}
+
+fn modern_push_round(timeout_ms: Option<u64>) -> (Fixture, Rpc, PathBuf, String, String) {
+    let fixture = Fixture::new();
+    let (_, data_dir) = push_fixture(&fixture);
+    let mut rpc = Rpc::start_with(&data_dir, "remote", false, timeout_ms);
+    let capabilities = json!({"elicitation":{"form":{},"url":{}}});
+    let assignment = rpc.modern_call(
+        1,
+        "preview_assignment",
+        json!({"repositoryId":"repo-1","profileId":"fictional"}),
+        capabilities.clone(),
+    );
+    let id = assignment["structuredContent"]["previewId"]
+        .as_str()
+        .unwrap();
+    let applied = rpc.modern_call(
+        2,
+        "apply_profile",
+        json!({"previewId":id}),
+        capabilities.clone(),
+    );
+    assert_eq!(applied["isError"], false, "{applied}");
+    let preview = rpc.modern_call(
+        3,
+        "preview_push",
+        json!({"repositoryId":"repo-1"}),
+        capabilities.clone(),
+    );
+    let preview_id = preview["structuredContent"]["previewId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let first = rpc.modern_call(4, "push", json!({"previewId":preview_id}), capabilities);
+    assert_eq!(first["resultType"], "input_required", "{first}");
+    let state = first["requestState"].as_str().unwrap().to_string();
+    let audit = fs::read_to_string(data_dir.join("mcp-audit.jsonl")).unwrap();
+    assert!(!audit
+        .lines()
+        .any(|line| serde_json::from_str::<Value>(line).unwrap()["tool"] == "push"));
+    (fixture, rpc, data_dir, preview_id, state)
+}
+
+fn modern_push_retry(
+    rpc: &mut Rpc,
+    id: u32,
+    preview_id: &str,
+    state: &str,
+    response: Value,
+) -> Value {
+    rpc.modern_request(
+        id,
+        "tools/call",
+        json!({
+            "name":"push", "arguments":{"previewId":preview_id},
+            "requestState":state, "inputResponses":{"approval":response}
+        }),
+        json!({"elicitation":{"form":{},"url":{}}}),
+    )
+}
+
+fn assert_push_audit(data_dir: &Path, expected_outcome: &str) {
+    let audit = fs::read_to_string(data_dir.join("mcp-audit.jsonl")).unwrap();
+    let last: Value = serde_json::from_str(audit.lines().last().unwrap()).unwrap();
+    assert_eq!(last["tool"], "push");
+    assert_eq!(last["outcome"], expected_outcome);
+    assert_eq!(last["confirmation"], "elicitation");
+}
+
+#[test]
+fn modern_mrtr_approval_and_denials() {
+    for (response, expected) in [
+        (
+            json!({"action":"accept","content":{"approved":true}}),
+            "Test stopped before",
+        ),
+        (json!({"action":"decline"}), "declined"),
+        (json!({"action":"cancel"}), "cancelled"),
+        (
+            json!({"action":"accept","content":{"approved":false}}),
+            "declined",
+        ),
+        (json!({"action":"accept"}), "failed"),
+        (
+            json!({"action":"accept","content":{"approved":"yes"}}),
+            "failed",
+        ),
+    ] {
+        let (_fixture, mut rpc, data_dir, preview_id, state) = modern_push_round(None);
+        let result = modern_push_retry(&mut rpc, 5, &preview_id, &state, response);
+        assert_eq!(result["isError"], true, "{result}");
+        assert!(
+            result["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains(expected),
+            "{result}"
+        );
+        assert_push_audit(
+            &data_dir,
+            if expected == "Test stopped before" {
+                "failed"
+            } else {
+                "rejected"
+            },
+        );
+        let reused = modern_push_retry(
+            &mut rpc,
+            6,
+            &preview_id,
+            &state,
+            json!({"action":"accept","content":{"approved":true}}),
+        );
+        assert_eq!(reused["isError"], true);
+        assert_push_audit(&data_dir, "rejected");
+    }
+}
+
+#[test]
+fn modern_mrtr_invalid_retries_and_expiry() {
+    let (_fixture, mut rpc, data_dir, preview_id, state) = modern_push_round(None);
+    let tampered = modern_push_retry(
+        &mut rpc,
+        5,
+        &preview_id,
+        "tampered-state",
+        json!({"action":"accept","content":{"approved":true}}),
+    );
+    assert_eq!(tampered["isError"], true);
+    assert_push_audit(&data_dir, "rejected");
+    let mismatched = modern_push_retry(
+        &mut rpc,
+        6,
+        "other-preview",
+        &state,
+        json!({"action":"accept","content":{"approved":true}}),
+    );
+    assert_eq!(mismatched["isError"], true);
+    assert_push_audit(&data_dir, "rejected");
+    let reused = modern_push_retry(
+        &mut rpc,
+        7,
+        &preview_id,
+        &state,
+        json!({"action":"accept","content":{"approved":true}}),
+    );
+    assert_eq!(reused["isError"], true);
+    let missing_state = rpc.modern_request(8, "tools/call", json!({"name":"push","arguments":{"previewId":preview_id},"inputResponses":{"approval":{"action":"accept","content":{"approved":true}}}}), json!({"elicitation":{"form":{}}}));
+    assert_eq!(missing_state["isError"], true);
+    assert_push_audit(&data_dir, "rejected");
+
+    let (_fixture, mut rpc, data_dir, preview_id, state) = modern_push_round(None);
+    let missing_responses = rpc.modern_request(
+        5,
+        "tools/call",
+        json!({"name":"push","arguments":{"previewId":preview_id},"requestState":state}),
+        json!({"elicitation":{"form":{}}}),
+    );
+    assert_eq!(missing_responses["isError"], true);
+    assert_push_audit(&data_dir, "rejected");
+    let reused = modern_push_retry(
+        &mut rpc,
+        6,
+        &preview_id,
+        &state,
+        json!({"action":"accept","content":{"approved":true}}),
+    );
+    assert_eq!(reused["isError"], true);
+
+    let (_fixture, mut rpc, data_dir, preview_id, state) = modern_push_round(None);
+    let missing_approval = rpc.modern_request(5, "tools/call", json!({"name":"push","arguments":{"previewId":preview_id},"requestState":state,"inputResponses":{}}), json!({"elicitation":{"form":{}}}));
+    assert_eq!(missing_approval["isError"], true);
+    assert_push_audit(&data_dir, "rejected");
+
+    let (_fixture, mut rpc, data_dir, preview_id, state) = modern_push_round(Some(10));
+    std::thread::sleep(std::time::Duration::from_millis(30));
+    let expired = modern_push_retry(
+        &mut rpc,
+        5,
+        &preview_id,
+        &state,
+        json!({"action":"accept","content":{"approved":true}}),
+    );
+    assert_eq!(expired["isError"], true);
+    assert!(expired["content"][0]["text"]
+        .as_str()
+        .unwrap()
+        .contains("timed out"));
+    assert_push_audit(&data_dir, "rejected");
+}
+
+#[test]
+fn modern_mrtr_rechecks_fingerprint_after_approval() {
+    let (fixture, mut rpc, data_dir, preview_id, state) = modern_push_round(None);
+    fs::write(
+        fixture.root.join("fictional-repo").join("changed.txt"),
+        "changed",
+    )
+    .unwrap();
+    let result = modern_push_retry(
+        &mut rpc,
+        5,
+        &preview_id,
+        &state,
+        json!({"action":"accept","content":{"approved":true}}),
+    );
+    assert_eq!(result["isError"], true);
+    assert!(result["content"][0]["text"]
+        .as_str()
+        .unwrap()
+        .contains("repository changed"));
+    assert_push_audit(&data_dir, "rejected");
+}
+
+#[test]
+fn modern_mrtr_state_cannot_be_reused_for_another_tool() {
+    let (_fixture, mut rpc, data_dir, preview_id, state) = modern_push_round(None);
+    let wrong_tool = rpc.modern_request(5, "tools/call", json!({
+        "name":"clone_repository", "arguments":{"previewId":preview_id},
+        "requestState":state, "inputResponses":{"approval":{"action":"accept","content":{"approved":true}}}
+    }), json!({"elicitation":{"form":{}}}));
+    assert_eq!(wrong_tool["isError"], true);
+    let reused = modern_push_retry(
+        &mut rpc,
+        6,
+        &preview_id,
+        &state,
+        json!({"action":"accept","content":{"approved":true}}),
+    );
+    assert_eq!(reused["isError"], true);
+    assert_push_audit(&data_dir, "rejected");
 }
 
 #[test]

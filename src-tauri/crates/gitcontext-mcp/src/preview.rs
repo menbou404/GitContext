@@ -1,6 +1,10 @@
 use chrono::{DateTime, Duration, Utc};
 use gitcontext_core::{git_ops::ExactChange, models::ConfigChange};
-use std::{collections::HashMap, sync::Mutex};
+use std::{
+    collections::HashMap,
+    sync::Mutex,
+    time::{Duration as StdDuration, Instant},
+};
 use uuid::Uuid;
 
 pub const CHANGED: &str = "The repository changed after the preview. Run the preview again.";
@@ -112,6 +116,66 @@ pub struct Entry {
 
 #[derive(Default)]
 pub struct Previews(Mutex<HashMap<String, Entry>>);
+
+pub struct PendingConfirmation {
+    pub entry: Entry,
+    pub preview_id: String,
+    pub tool: &'static str,
+    pub prompt: String,
+    created_at: Instant,
+}
+
+#[derive(Default)]
+pub struct PendingConfirmations(Mutex<HashMap<String, PendingConfirmation>>);
+
+impl PendingConfirmations {
+    pub fn issue(
+        &self,
+        entry: Entry,
+        preview_id: String,
+        tool: &'static str,
+        prompt: String,
+        timeout: StdDuration,
+    ) -> String {
+        let id = Uuid::new_v4().to_string();
+        let now = Instant::now();
+        let mut entries = self.0.lock().unwrap();
+        entries.retain(|_, pending| now.duration_since(pending.created_at) < timeout);
+        entries.insert(
+            id.clone(),
+            PendingConfirmation {
+                entry,
+                preview_id,
+                tool,
+                prompt,
+                created_at: now,
+            },
+        );
+        id
+    }
+
+    pub fn take(
+        &self,
+        id: &str,
+        tool: &str,
+        timeout: StdDuration,
+    ) -> Result<PendingConfirmation, String> {
+        // Remove before checking anything: even a malformed retry spends this approval.
+        let pending = self
+            .0
+            .lock()
+            .unwrap()
+            .remove(id)
+            .ok_or("Confirmation is invalid, expired, or already used.")?;
+        if pending.created_at.elapsed() >= timeout {
+            return Err("Confirmation timed out.".into());
+        }
+        if pending.tool != tool {
+            return Err("Confirmation is for a different tool.".into());
+        }
+        Ok(pending)
+    }
+}
 
 impl Previews {
     pub fn issue(
@@ -262,5 +326,34 @@ mod tests {
             Fingerprint::commit("main".into(), "head".into(), vec![a.clone(), b.clone()]),
             Fingerprint::commit("main".into(), "head".into(), vec![b, a])
         );
+    }
+
+    #[test]
+    fn pending_confirmations_expire_and_are_single_use() {
+        let (previews, preview_id) = issued();
+        let entry = previews
+            .consume(&preview_id, Operation::Commit, Utc::now())
+            .unwrap();
+        let pending = PendingConfirmations::default();
+        let timeout = StdDuration::from_secs(120);
+        let expired = pending.issue(
+            entry.clone(),
+            preview_id.clone(),
+            "push",
+            "Confirm".into(),
+            timeout,
+        );
+        pending
+            .0
+            .lock()
+            .unwrap()
+            .get_mut(&expired)
+            .unwrap()
+            .created_at -= timeout;
+        let fresh = pending.issue(entry, preview_id, "push", "Confirm".into(), timeout);
+        assert_eq!(pending.0.lock().unwrap().len(), 1);
+        assert!(pending.take(&expired, "push", timeout).is_err());
+        assert!(pending.take(&fresh, "push", timeout).is_ok());
+        assert!(pending.take(&fresh, "push", timeout).is_err());
     }
 }
