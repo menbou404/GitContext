@@ -26,7 +26,7 @@
 
 ### Fixed
 
-- MCPのクライアント情報とelicitation対応をリクエストごとに判定し、モダンプロトコルの`_meta`に対応
+- MCPのクライアント情報とelicitation対応をリクエストごとに判定し、モダンプロトコルの`_meta`とMRTRによる確認に対応。レガシーの`elicitation/create`も維持
 - Profileから外したGitHubユーザー名・gh設定ディレクトリ・SSH鍵の設定が、再適用後もリポジトリのローカル設定に残る問題（適用前のプレビューに「削除」と表示し、GitContextが書いた`core.sshCommand`だけを削除）
 
 ### Planned
