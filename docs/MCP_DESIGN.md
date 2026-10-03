@@ -164,6 +164,8 @@ MCPのelicitationを使い、`remote`の実行前にクライアントへ確認�
 
 MRTRの`requestState`はサーバー側の確認待ちを指す不透明なランダムIDとし、操作内容を埋め込まない。確認待ちは2分で失効し、再送時に承認・拒否や入力の妥当性にかかわらず消費する。最初の`input_required`は操作の結果ではないため監査ログに記録せず、再送の結果を従来どおり`confirmation: "elicitation"`で記録する。
 
+確認依頼から応答までが1秒未満の場合、拒否・キャンセル・内容なし・解析失敗だけでなく、`approved: true`の承認も人が文面を確認した結果とはみなさず実行しない。レガシーでは`elicitation/create`の送信直前から、MRTRでは確認待ちの発行から再送の受信までを測る。監査ログは`outcome: "rejected"`とし、固定のsummaryで自動応答を区別する。
+
 - 確認の文面には、操作の種類、Profile、GitHubユーザー名、リポジトリ、ブランチ、対象（commit ID、PR番号、merge方法、公開範囲など）を表示する。
 - 人が承認した場合だけ実行する。拒否、キャンセル、**2分以内に応答がない場合**は、何もせずに理由を返す（応答しないまま止まるクライアントがあるため）。
 - 確認の結果はツールの`arguments`ではなく、elicitationの応答（MRTRでは`inputResponses`）から受け取る。
@@ -176,7 +178,8 @@ MRTRの`requestState`はサーバー側の確認待ちを指す不透明なラ�
 | クライアント | 状況 |
 |---|---|
 | Claude Code（CLI） | 対応。2.1.288の対話セッションで実機確認済み（モダンプロトコル、MRTRで確認フォームが表示され、承認・拒否とも正しく届く）。同じセッション内でツール処理中に送る`elicitation/create`には応答しない |
-| Claude Code（デスクトップのCodeタブ）、Codex Desktop | 確認フォームが表示されずに閉じられるという報告がある |
+| Claude Code（デスクトップのCodeタブ） | 2026-10に実機確認: 内蔵2.1.281、確認依頼を表示せず約4ミリ秒で自動的に拒否を返す |
+| Codex Desktop | 確認フォームが表示されずに閉じられるという報告がある |
 | Codex CLI | 対応が進行中。自動で拒否を返す場合があるという報告がある |
 | Claude Desktop | 非対応 |
 | Claude Cowork | 対応を宣言するが確認依頼を無視し、呼び出しが止まるという報告がある |
@@ -189,12 +192,13 @@ MRTRの`requestState`はサーバー側の確認待ちを指す不透明なラ�
 
 | クライアントの状態 | `--trust-client-approval`なし（既定） | `--trust-client-approval`あり |
 |---|---|---|
-| elicitationに対応し、不安定な一覧にない | elicitationで確認する | elicitationを使わず、クライアントの確認に任せる |
+| elicitationに対応し、不安定な一覧にない | elicitationで確認する | elicitationで確認する |
 | elicitationに対応していない、または不安定な一覧にある | 実行しない。AI連携画面で設定を見直すよう案内する | クライアントの確認に任せて実行する |
 
 - elicitationの「対応」は、フォーム形式の確認を宣言している場合だけとみなす。URLを開かせる形式だけを宣言しているクライアントは「対応していない」として扱う。
 - クライアント名とelicitation対応はリクエストごとに判定する。モダンプロトコルでは各リクエストの`_meta`にある`io.modelcontextprotocol/clientInfo`と`io.modelcontextprotocol/clientCapabilities`を使い、レガシープロトコルでは`initialize`の情報にフォールバックする。監査ログのクライアント名にも同じ情報を使う。
 - **不安定な一覧**: 対応を宣言しながら確認フォームを表示しないことが分かっているクライアントを、当該リクエストの`clientInfo.name`で判定する一覧。サーバーには区別がつかない「自動の拒否」を人の拒否と取り違えないためのもので、アプリの更新に合わせて見直す。
+- Claude CodeのデスクトップCodeタブが起動したサーバープロセスに空でない`CLAUDE_CODE_DESKTOP_APP_VERSION`がある場合は、起動時に一度判定して不安定なクライアントと同じ扱いにする。CLIとCodeタブは`clientInfo.name`が同じため名前だけでは区別できない。この環境変数は非公開仕様なので補助的な判定であり、応答時間による検出も併用する。
 - `--trust-client-approval`は、GUIの「AI連携」画面で、確認画面を出せないクライアントに「GitHub操作まで」を選び、警告に同意したときだけ登録時に付ける（[UI_DESIGN.md](UI_DESIGN.md)参照）。画面ができるまでは手で付ける。
 - どの方法でも、プレビューIDの照合は必ず行う。
 - 監査ログには、確認の方法（`elicitation`／`client`）と結果を記録する。クライアントに任せた場合は、実行結果にもその旨を含める。

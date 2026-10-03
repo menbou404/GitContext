@@ -4,7 +4,7 @@ use std::{
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
     process::{Child, ChildStdin, ChildStdout, Command, Stdio},
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 struct Fixture {
@@ -62,9 +62,23 @@ impl Rpc {
     }
 
     fn start_with(data_dir: &Path, tier: &str, trust: bool, timeout_ms: Option<u64>) -> Self {
+        Self::start_with_desktop(data_dir, tier, trust, timeout_ms, false)
+    }
+
+    fn start_with_desktop(
+        data_dir: &Path,
+        tier: &str,
+        trust: bool,
+        timeout_ms: Option<u64>,
+        desktop: bool,
+    ) -> Self {
         let mut command = Command::new(env!("CARGO_BIN_EXE_gitcontext-mcp"));
         command.args(["--max-tier", tier]);
         command.env("USERPROFILE", data_dir.parent().unwrap());
+        command.env_remove("CLAUDE_CODE_DESKTOP_APP_VERSION");
+        if desktop {
+            command.env("CLAUDE_CODE_DESKTOP_APP_VERSION", "2.1.281");
+        }
         if tier == "remote" {
             command.env("GITCONTEXT_TEST_STOP_BEFORE_REMOTE_EXECUTION", "1");
         }
@@ -642,10 +656,10 @@ fn remote_without_elicitation_is_rejected_and_audited() {
 
 #[test]
 fn modern_requests_use_per_request_elicitation_capability() {
-    for supports_form in [true, false] {
+    for (supports_form, trust) in [(true, false), (true, true), (false, false), (false, true)] {
         let fixture = Fixture::new();
         let (_, data_dir) = push_fixture(&fixture);
-        let mut rpc = Rpc::start_tier(&data_dir, "remote");
+        let mut rpc = Rpc::start_with(&data_dir, "remote", trust, None);
         let capabilities = if supports_form {
             json!({"elicitation":{"form":{}}})
         } else {
@@ -716,6 +730,11 @@ fn modern_requests_use_per_request_elicitation_capability() {
             assert_eq!(uuid_version(state), Some('4'));
             let response = rpc.modern_request(7, "tools/call", json!({"name":"push","arguments":{"previewId":preview_id},"requestState":state,"inputResponses":{"approval":{"action":"decline"}}}), capabilities);
             assert_eq!(response["isError"], true, "{response}");
+        } else if trust {
+            assert!(first["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("Test stopped before"));
         } else {
             assert!(first["content"][0]["text"]
                 .as_str()
@@ -729,6 +748,8 @@ fn modern_requests_use_per_request_elicitation_capability() {
             last["confirmation"],
             if supports_form {
                 json!("elicitation")
+            } else if trust {
+                json!("client")
             } else {
                 json!(null)
             }
@@ -805,24 +826,48 @@ fn assert_push_audit(data_dir: &Path, expected_outcome: &str) {
 
 #[test]
 fn modern_mrtr_approval_and_denials() {
-    for (response, expected) in [
+    for (response, expected, wait) in [
+        (
+            json!({"action":"accept","content":{"approved":true}}),
+            "approved too quickly",
+            false,
+        ),
         (
             json!({"action":"accept","content":{"approved":true}}),
             "Test stopped before",
+            true,
         ),
-        (json!({"action":"decline"}), "declined"),
-        (json!({"action":"cancel"}), "cancelled"),
+        (
+            json!({"action":"decline"}),
+            "declined without showing",
+            false,
+        ),
+        (json!({"action":"decline"}), "Confirmation declined.", true),
+        (
+            json!({"action":"cancel"}),
+            "declined without showing",
+            false,
+        ),
         (
             json!({"action":"accept","content":{"approved":false}}),
-            "declined",
+            "declined without showing",
+            false,
         ),
-        (json!({"action":"accept"}), "failed"),
+        (
+            json!({"action":"accept"}),
+            "declined without showing",
+            false,
+        ),
         (
             json!({"action":"accept","content":{"approved":"yes"}}),
-            "failed",
+            "declined without showing",
+            false,
         ),
     ] {
         let (_fixture, mut rpc, data_dir, preview_id, state) = modern_push_round(None);
+        if wait {
+            std::thread::sleep(Duration::from_millis(1050));
+        }
         let result = modern_push_retry(&mut rpc, 5, &preview_id, &state, response);
         assert_eq!(result["isError"], true, "{result}");
         assert!(
@@ -840,6 +885,14 @@ fn modern_mrtr_approval_and_denials() {
                 "rejected"
             },
         );
+        let audit = fs::read_to_string(data_dir.join("mcp-audit.jsonl")).unwrap();
+        let last: Value = serde_json::from_str(audit.lines().last().unwrap()).unwrap();
+        if !wait {
+            assert_eq!(
+                last["summary"],
+                "Remote operation rejected: client answered without showing the prompt"
+            );
+        }
         let reused = modern_push_retry(
             &mut rpc,
             6,
@@ -933,6 +986,7 @@ fn modern_mrtr_rechecks_fingerprint_after_approval() {
         "changed",
     )
     .unwrap();
+    std::thread::sleep(Duration::from_millis(1050));
     let result = modern_push_retry(
         &mut rpc,
         5,
@@ -969,11 +1023,35 @@ fn modern_mrtr_state_cannot_be_reused_for_another_tool() {
 
 #[test]
 fn elicitation_decline_cancel_accept_and_timeout() {
-    for (action, content, expected) in [
-        ("decline", json!(null), "declined"),
-        ("cancel", json!(null), "cancelled"),
-        ("accept", json!({"approved":false}), "declined"),
-        ("accept", json!({"approved":true}), "Test stopped before"),
+    for (action, content, expected, wait) in [
+        ("decline", json!(null), "declined without showing", false),
+        ("decline", json!(null), "Confirmation declined.", true),
+        ("cancel", json!(null), "declined without showing", false),
+        (
+            "accept",
+            json!({"approved":false}),
+            "declined without showing",
+            false,
+        ),
+        ("accept", json!(null), "declined without showing", false),
+        (
+            "accept",
+            json!({"approved":"yes"}),
+            "declined without showing",
+            false,
+        ),
+        (
+            "accept",
+            json!({"approved":true}),
+            "approved too quickly",
+            false,
+        ),
+        (
+            "accept",
+            json!({"approved":true}),
+            "Test stopped before",
+            true,
+        ),
     ] {
         let fixture = Fixture::new();
         let (_, data_dir) = push_fixture(&fixture);
@@ -991,6 +1069,9 @@ fn elicitation_decline_cancel_accept_and_timeout() {
             request["params"]["requestedSchema"]["properties"]["approved"]["type"],
             "boolean"
         );
+        if wait {
+            std::thread::sleep(Duration::from_millis(1050));
+        }
         rpc.send(json!({"jsonrpc":"2.0","id":request["id"],"result":{"action":action,"content":content}}));
         let response = rpc.read_message();
         assert_eq!(response["id"], 5, "{response}");
@@ -1004,6 +1085,13 @@ fn elicitation_decline_cancel_accept_and_timeout() {
         let audit = fs::read_to_string(data_dir.join("mcp-audit.jsonl")).unwrap();
         let last: Value = serde_json::from_str(audit.lines().last().unwrap()).unwrap();
         assert_eq!(last["confirmation"], "elicitation");
+        if !wait {
+            assert_eq!(
+                last["summary"],
+                "Remote operation rejected: client answered without showing the prompt"
+            );
+            assert_eq!(last["outcome"], "rejected");
+        }
     }
     let fixture = Fixture::new();
     let (_, data_dir) = push_fixture(&fixture);
@@ -1027,14 +1115,35 @@ fn elicitation_decline_cancel_accept_and_timeout() {
 }
 
 #[test]
-fn trusted_client_does_not_receive_elicitation() {
+fn trusted_client_with_elicitation_still_receives_prompt() {
     let fixture = Fixture::new();
     let (_, data_dir) = push_fixture(&fixture);
     let mut rpc = Rpc::start_with(&data_dir, "remote", true, None);
     initialize_with_capabilities(&mut rpc, json!({"elicitation":{"form":{}}}));
     let id = applied_push_preview(&mut rpc);
+    rpc.send(json!({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"push","arguments":{"previewId":id}}}));
+    let request = rpc.read_message();
+    assert_eq!(request["method"], "elicitation/create");
+    rpc.send(json!({"jsonrpc":"2.0","id":request["id"],"result":{"action":"decline"}}));
+    let response = rpc.read_message();
+    assert_eq!(response["result"]["isError"], true);
+    assert!(response["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap()
+        .contains("declined without showing"));
+    let audit = fs::read_to_string(data_dir.join("mcp-audit.jsonl")).unwrap();
+    let last: Value = serde_json::from_str(audit.lines().last().unwrap()).unwrap();
+    assert_eq!(last["confirmation"], "elicitation");
+}
+
+#[test]
+fn trusted_client_without_elicitation_uses_client_confirmation() {
+    let fixture = Fixture::new();
+    let (_, data_dir) = push_fixture(&fixture);
+    let mut rpc = Rpc::start_with(&data_dir, "remote", true, None);
+    initialize(&mut rpc);
+    let id = applied_push_preview(&mut rpc);
     let response = rpc.call(5, "push", json!({"previewId":id}));
-    assert_eq!(response["isError"], true);
     assert!(response["content"][0]["text"]
         .as_str()
         .unwrap()
@@ -1042,6 +1151,63 @@ fn trusted_client_does_not_receive_elicitation() {
     let audit = fs::read_to_string(data_dir.join("mcp-audit.jsonl")).unwrap();
     let last: Value = serde_json::from_str(audit.lines().last().unwrap()).unwrap();
     assert_eq!(last["confirmation"], "client");
+}
+
+#[test]
+fn desktop_code_tab_rejects_before_elicitation_unless_trusted() {
+    for modern in [false, true] {
+        for trust in [false, true] {
+            let fixture = Fixture::new();
+            let (_, data_dir) = push_fixture(&fixture);
+            let mut rpc = Rpc::start_with_desktop(&data_dir, "remote", trust, None, true);
+            let capabilities = json!({"elicitation":{"form":{}}});
+            let result = if modern {
+                let assignment = rpc.modern_call(
+                    1,
+                    "preview_assignment",
+                    json!({"repositoryId":"repo-1","profileId":"fictional"}),
+                    capabilities.clone(),
+                );
+                let id = assignment["structuredContent"]["previewId"]
+                    .as_str()
+                    .unwrap();
+                rpc.modern_call(
+                    2,
+                    "apply_profile",
+                    json!({"previewId":id}),
+                    capabilities.clone(),
+                );
+                let preview = rpc.modern_call(
+                    3,
+                    "preview_push",
+                    json!({"repositoryId":"repo-1"}),
+                    capabilities.clone(),
+                );
+                let id = preview["structuredContent"]["previewId"].as_str().unwrap();
+                rpc.modern_call(4, "push", json!({"previewId":id}), capabilities)
+            } else {
+                initialize_with_capabilities(&mut rpc, capabilities);
+                let id = applied_push_preview(&mut rpc);
+                rpc.call(5, "push", json!({"previewId":id}))
+            };
+            assert_ne!(result["resultType"], "input_required", "{result}");
+            let message = result["content"][0]["text"].as_str().unwrap();
+            if trust {
+                assert!(message.contains("Test stopped before"), "{result}");
+            } else {
+                assert!(
+                    message.contains("cannot show GitContext's confirmation prompt"),
+                    "{result}"
+                );
+            }
+            let audit = fs::read_to_string(data_dir.join("mcp-audit.jsonl")).unwrap();
+            let last: Value = serde_json::from_str(audit.lines().last().unwrap()).unwrap();
+            assert_eq!(
+                last["confirmation"],
+                if trust { json!("client") } else { json!(null) }
+            );
+        }
+    }
 }
 
 #[test]
@@ -1055,6 +1221,7 @@ fn acceptance_rechecks_the_fingerprint() {
     let request = rpc.read_message();
     assert_eq!(request["method"], "elicitation/create");
     fs::write(repo.join("changed-after-preview.txt"), "change").unwrap();
+    std::thread::sleep(Duration::from_millis(1050));
     rpc.send(json!({"jsonrpc":"2.0","id":request["id"],"result":{"action":"accept","content":{"approved":true}}}));
     let response = rpc.read_message();
     assert_eq!(response["id"], 5);

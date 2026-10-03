@@ -26,6 +26,7 @@
 
 ### Fixed
 
+- MCPの即時自動応答を人の拒否・承認と区別して拒否し、監査ログにも記録。Claude CodeのデスクトップCodeタブを補助的に検出して確認画面を出さずに拒否し、`--trust-client-approval`指定時も対応クライアントではGitContextの確認画面を優先
 - MCPのクライアント情報とelicitation対応をリクエストごとに判定し、モダンプロトコルの`_meta`とMRTRによる確認に対応。レガシーの`elicitation/create`も維持
 - Profileから外したGitHubユーザー名・gh設定ディレクトリ・SSH鍵の設定が、再適用後もリポジトリのローカル設定に残る問題（適用前のプレビューに「削除」と表示し、GitContextが書いた`core.sshCommand`だけを削除）
 

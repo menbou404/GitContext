@@ -123,6 +123,7 @@ pub struct PendingConfirmation {
     pub tool: &'static str,
     pub prompt: String,
     created_at: Instant,
+    pub responded_after: StdDuration,
 }
 
 #[derive(Default)]
@@ -149,6 +150,7 @@ impl PendingConfirmations {
                 tool,
                 prompt,
                 created_at: now,
+                responded_after: StdDuration::ZERO,
             },
         );
         id
@@ -161,13 +163,14 @@ impl PendingConfirmations {
         timeout: StdDuration,
     ) -> Result<PendingConfirmation, String> {
         // Remove before checking anything: even a malformed retry spends this approval.
-        let pending = self
+        let mut pending = self
             .0
             .lock()
             .unwrap()
             .remove(id)
             .ok_or("Confirmation is invalid, expired, or already used.")?;
-        if pending.created_at.elapsed() >= timeout {
+        pending.responded_after = pending.created_at.elapsed();
+        if pending.responded_after >= timeout {
             return Err("Confirmation timed out.".into());
         }
         if pending.tool != tool {
