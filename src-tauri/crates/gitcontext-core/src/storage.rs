@@ -32,10 +32,15 @@ impl Drop for StateLock {
 impl StateStore {
     pub fn new(config_dir: PathBuf) -> Self {
         #[cfg(test)]
-        if let Ok(release_dir) = platform_config_dir() {
+        for release_dir in [platform_config_dir(), legacy_config_dir()]
+            .into_iter()
+            .flatten()
+        {
             assert!(
                 config_dir != release_dir
-                    && config_dir != release_dir.with_file_name(DEVELOPMENT_IDENTIFIER),
+                    && config_dir != release_dir.with_file_name(DEVELOPMENT_IDENTIFIER)
+                    && config_dir != release_dir.with_file_name(RELEASE_IDENTIFIER)
+                    && config_dir != release_dir.with_file_name(".gitcontext-dev"),
                 "tests must not use a real GitContext settings directory"
             );
         }
@@ -252,7 +257,11 @@ fn build_config_dir_with_override(
         return Ok(override_dir);
     }
     if debug {
-        return Ok(release_config_dir.with_file_name(DEVELOPMENT_IDENTIFIER));
+        return Ok(release_config_dir.with_file_name(if cfg!(windows) {
+            ".gitcontext-dev"
+        } else {
+            DEVELOPMENT_IDENTIFIER
+        }));
     }
     Ok(release_config_dir)
 }
@@ -269,9 +278,160 @@ pub fn default_config_dir() -> Result<PathBuf, String> {
     build_config_dir(platform_config_dir()?)
 }
 
+/// Resolve the same directory for the GUI and MCP, and migrate before either loads state.
+pub fn open_default_store() -> Result<StateStore, String> {
+    let override_dir = std::env::var_os("GITCONTEXT_DATA_DIR").filter(|value| !value.is_empty());
+    let store = StateStore::new(default_config_dir()?);
+    #[cfg(windows)]
+    if override_dir.is_none() && !store.state_path().exists() {
+        if let Ok(old_dir) = legacy_config_dir() {
+            migrate_from_legacy(&store, &old_dir, false, || {})?;
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = override_dir;
+    Ok(store)
+}
+
+#[cfg(windows)]
+fn migrate_from_legacy(
+    store: &StateStore,
+    old_dir: &Path,
+    overridden: bool,
+    after_lock: impl FnOnce(),
+) -> Result<(), String> {
+    if overridden
+        || store.state_path().exists()
+        || !legacy_state_is_regular(&old_dir.join("state.json"))?
+    {
+        return Ok(());
+    }
+    let _guard = store.lock()?;
+    after_lock();
+    if store.state_path().exists() {
+        return Ok(());
+    }
+    copy_legacy_entries(old_dir, store.config_dir(), true)?;
+    let original = fs::read(old_dir.join("state.json"))
+        .map_err(|error| format!("Could not read legacy settings: {error}"))?;
+    let mut data: AppData = serde_json::from_slice(&original)
+        .map_err(|error| format!("Legacy GitContext settings are invalid JSON: {error}"))?;
+    let changed = rewrite_gh_config_dirs(&mut data, old_dir, store.config_dir());
+    let temporary = store.config_dir().join("state.json.tmp");
+    fs::write(&temporary, &original)
+        .map_err(|error| format!("Could not stage migrated settings: {error}"))?;
+    fs::rename(&temporary, store.state_path())
+        .map_err(|error| format!("Could not activate migrated settings: {error}"))?;
+    if changed {
+        if let Err(error) = store.save(&data) {
+            let _ = fs::remove_file(store.state_path());
+            return Err(error);
+        }
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn legacy_state_is_regular(path: &Path) -> Result<bool, String> {
+    use std::os::windows::fs::MetadataExt;
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => Ok(metadata.is_file() && metadata.file_attributes() & 0x400 == 0),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(format!("Could not inspect legacy settings: {error}")),
+    }
+}
+
+#[cfg(windows)]
+fn copy_legacy_entries(source: &Path, destination: &Path, root: bool) -> Result<(), String> {
+    for entry in
+        fs::read_dir(source).map_err(|error| format!("Could not list legacy settings: {error}"))?
+    {
+        let entry = entry.map_err(|error| format!("Could not list legacy entry: {error}"))?;
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.eq_ignore_ascii_case("state.lock")
+            || name.eq_ignore_ascii_case("state.json.backup")
+            || name.to_ascii_lowercase().ends_with(".tmp")
+            || (root && name.eq_ignore_ascii_case("state.json"))
+        {
+            continue;
+        }
+        let metadata = fs::symlink_metadata(entry.path())
+            .map_err(|error| format!("Could not inspect legacy entry: {error}"))?;
+        use std::os::windows::fs::MetadataExt;
+        if metadata.file_type().is_symlink() || metadata.file_attributes() & 0x400 != 0 {
+            continue;
+        }
+        let target = destination.join(entry.file_name());
+        if metadata.is_dir() {
+            fs::create_dir_all(&target)
+                .map_err(|error| format!("Could not create migrated directory: {error}"))?;
+            copy_legacy_entries(&entry.path(), &target, false)?;
+        } else if metadata.is_file() {
+            fs::copy(entry.path(), &target)
+                .map_err(|error| format!("Could not copy legacy settings: {error}"))?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn rewrite_gh_config_dirs(data: &mut AppData, old_dir: &Path, new_dir: &Path) -> bool {
+    let old = old_dir.to_string_lossy().replace('/', "\\");
+    let old_parts: Vec<_> = old.split('\\').filter(|part| !part.is_empty()).collect();
+    let mut changed = false;
+    for profile in &mut data.profiles {
+        if let Some(path) = &mut profile.gh_config_dir {
+            let normalized = path.replace('/', "\\");
+            let parts: Vec<_> = normalized
+                .split('\\')
+                .filter(|part| !part.is_empty())
+                .collect();
+            if parts.len() >= old_parts.len()
+                && !parts.iter().any(|part| *part == "." || *part == "..")
+                && parts[..old_parts.len()]
+                    .iter()
+                    .zip(&old_parts)
+                    .all(|(part, old)| part.to_lowercase() == old.to_lowercase())
+            {
+                let mut new_path = new_dir.to_path_buf();
+                for part in &parts[old_parts.len()..] {
+                    new_path.push(part);
+                }
+                *path = new_path.to_string_lossy().into_owned();
+                changed = true;
+            }
+        }
+    }
+    changed
+}
+
+#[cfg(windows)]
+fn legacy_config_dir() -> Result<PathBuf, String> {
+    let base = std::env::var_os("APPDATA")
+        .map(PathBuf::from)
+        .ok_or_else(|| "Could not locate legacy GitContext settings directory.".to_string())?;
+    Ok(legacy_config_dir_from_base(&base, cfg!(debug_assertions)))
+}
+
+#[cfg(windows)]
+fn legacy_config_dir_from_base(base: &Path, debug: bool) -> PathBuf {
+    base.join(if debug {
+        DEVELOPMENT_IDENTIFIER
+    } else {
+        RELEASE_IDENTIFIER
+    })
+}
+
+#[cfg(not(windows))]
+#[cfg(test)]
+fn legacy_config_dir() -> Result<PathBuf, String> {
+    Err("No legacy directory on this platform.".into())
+}
+
 fn platform_config_dir() -> Result<PathBuf, String> {
     #[cfg(target_os = "windows")]
-    let base = std::env::var_os("APPDATA").map(PathBuf::from);
+    let base = std::env::var_os("USERPROFILE").map(PathBuf::from);
     #[cfg(target_os = "macos")]
     let base = std::env::var_os("HOME")
         .map(PathBuf::from)
@@ -285,8 +445,26 @@ fn platform_config_dir() -> Result<PathBuf, String> {
                 .map(PathBuf::from)
                 .map(|home| home.join(".config"))
         });
-    base.map(|base| base.join(RELEASE_IDENTIFIER))
-        .ok_or_else(|| "Could not locate GitContext's settings directory.".into())
+    base.map(|base| {
+        #[cfg(windows)]
+        {
+            windows_config_dir_from_home(&base, false)
+        }
+        #[cfg(not(windows))]
+        {
+            base.join(RELEASE_IDENTIFIER)
+        }
+    })
+    .ok_or_else(|| "Could not locate GitContext's settings directory.".into())
+}
+
+#[cfg(windows)]
+fn windows_config_dir_from_home(home: &Path, debug: bool) -> PathBuf {
+    home.join(if debug {
+        ".gitcontext-dev"
+    } else {
+        ".gitcontext"
+    })
 }
 
 #[cfg(test)]
@@ -312,10 +490,18 @@ mod tests {
     fn config_dir_selects_debug_sibling_and_rejects_relative_override() {
         let release = std::env::temp_dir()
             .join("gitcontext-config-test")
-            .join(RELEASE_IDENTIFIER);
+            .join(if cfg!(windows) {
+                ".gitcontext"
+            } else {
+                RELEASE_IDENTIFIER
+            });
         assert_eq!(
             build_config_dir_with_override(release.clone(), None, true).unwrap(),
-            release.with_file_name(DEVELOPMENT_IDENTIFIER)
+            release.with_file_name(if cfg!(windows) {
+                ".gitcontext-dev"
+            } else {
+                DEVELOPMENT_IDENTIFIER
+            })
         );
         assert_eq!(
             build_config_dir_with_override(release.clone(), None, false).unwrap(),
@@ -429,7 +615,11 @@ mod tests {
         StateStore::new(
             platform_config_dir()
                 .unwrap()
-                .with_file_name(DEVELOPMENT_IDENTIFIER),
+                .with_file_name(if cfg!(windows) {
+                    ".gitcontext-dev"
+                } else {
+                    DEVELOPMENT_IDENTIFIER
+                }),
         );
     }
 
@@ -500,9 +690,144 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn windows_default_config_dir_uses_appdata() {
-        let expected =
-            PathBuf::from(std::env::var_os("APPDATA").unwrap()).join("app.gitcontext.desktop");
-        assert_eq!(platform_config_dir().unwrap(), expected);
+    fn windows_default_config_dir_uses_home() {
+        let home = std::env::temp_dir().join("gitcontext-test-home");
+        let roaming = std::env::temp_dir().join("gitcontext-test-roaming");
+        assert_eq!(
+            windows_config_dir_from_home(&home, false),
+            home.join(".gitcontext")
+        );
+        assert_eq!(
+            windows_config_dir_from_home(&home, true),
+            home.join(".gitcontext-dev")
+        );
+        assert_eq!(
+            legacy_config_dir_from_base(&roaming, false),
+            roaming.join(RELEASE_IDENTIFIER)
+        );
+        assert_eq!(
+            legacy_config_dir_from_base(&roaming, true),
+            roaming.join(DEVELOPMENT_IDENTIFIER)
+        );
+    }
+
+    #[cfg(windows)]
+    fn migration_dirs() -> (PathBuf, PathBuf, StateStore) {
+        let root =
+            std::env::temp_dir().join(format!("gitcontext-migrate-{}", uuid::Uuid::new_v4()));
+        let old = root.join("roaming").join(DEVELOPMENT_IDENTIFIER);
+        let new = root.join("home").join(".gitcontext-dev");
+        fs::create_dir_all(&old).unwrap();
+        (root, old, StateStore::new(new))
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn migrates_files_and_rewrites_only_legacy_gh_paths() {
+        let (root, old, store) = migration_dirs();
+        let inside = old.join("gh").join("one");
+        let outside = root.join("other").join("gh");
+        let state = serde_json::json!({
+            "version": 2,
+            "profiles": [
+                {"id":"one","label":"One","accent":"blue","gitName":"Test","gitEmail":"test@example.com","ghConfigDir":inside.to_string_lossy().to_uppercase()},
+                {"id":"two","label":"Two","accent":"blue","gitName":"Test","gitEmail":"test@example.com","ghConfigDir":outside.to_string_lossy()},
+                {"id":"three","label":"Three","accent":"blue","gitName":"Test","gitEmail":"test@example.com","ghConfigDir":format!("{}-other", old.display())}
+            ], "repositories": []
+        });
+        let original = serde_json::to_vec(&state).unwrap();
+        fs::write(old.join("state.json"), &original).unwrap();
+        fs::create_dir_all(&inside).unwrap();
+        fs::write(inside.join("config.yml"), "credential").unwrap();
+        fs::create_dir_all(old.join("backups")).unwrap();
+        fs::write(old.join("backups").join("state-old.json"), "backup").unwrap();
+        fs::write(old.join("mcp-audit.jsonl"), "audit").unwrap();
+        fs::write(old.join("mcp-audit.jsonl.1"), "rotated").unwrap();
+        fs::write(old.join("state.lock"), "old lock").unwrap();
+        fs::write(old.join("ignored.tmp"), "temporary").unwrap();
+        fs::write(old.join("state.json.backup"), "old temporary backup").unwrap();
+        migrate_from_legacy(&store, &old, false, || {}).unwrap();
+        let data = store.load().unwrap();
+        assert_eq!(
+            data.profiles[0]
+                .gh_config_dir
+                .as_deref()
+                .unwrap()
+                .to_lowercase(),
+            store
+                .config_dir()
+                .join("gh")
+                .join("one")
+                .to_string_lossy()
+                .to_lowercase()
+        );
+        assert_eq!(
+            data.profiles[1].gh_config_dir.as_deref(),
+            Some(outside.to_str().unwrap())
+        );
+        assert_eq!(
+            data.profiles[2].gh_config_dir.as_deref(),
+            Some(format!("{}-other", old.display()).as_str())
+        );
+        assert_eq!(
+            fs::read(store.config_dir().join("gh/one/config.yml")).unwrap(),
+            b"credential"
+        );
+        assert_eq!(
+            fs::read(store.config_dir().join("mcp-audit.jsonl.1")).unwrap(),
+            b"rotated"
+        );
+        assert_eq!(
+            fs::read(store.config_dir().join("backups/state-old.json")).unwrap(),
+            b"backup"
+        );
+        assert!(!store.config_dir().join("ignored.tmp").exists());
+        assert!(!store.config_dir().join("state.json.backup").exists());
+        assert_eq!(
+            fs::read(store.config_dir().join("state.lock")).unwrap(),
+            b""
+        );
+        assert_eq!(fs::read(old.join("state.json")).unwrap(), original);
+        assert_eq!(fs::read(old.join("state.lock")).unwrap(), b"old lock");
+        assert_eq!(fs::read(old.join("ignored.tmp")).unwrap(), b"temporary");
+        assert!(backup_paths(&store)
+            .iter()
+            .any(|path| fs::read(path).unwrap() == original));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn migration_skips_existing_state_override_and_post_lock_state() {
+        let (root, old, store) = migration_dirs();
+        fs::write(old.join("state.json"), b"legacy").unwrap();
+        fs::create_dir_all(store.config_dir()).unwrap();
+        fs::write(store.state_path(), b"current").unwrap();
+        migrate_from_legacy(&store, &old, false, || panic!("must not lock")).unwrap();
+        assert_eq!(fs::read(store.state_path()).unwrap(), b"current");
+        fs::remove_file(store.state_path()).unwrap();
+        migrate_from_legacy(&store, &old, true, || panic!("must not lock")).unwrap();
+        assert!(!store.state_path().exists());
+        migrate_from_legacy(&store, &old, false, || {
+            fs::write(store.state_path(), b"created while waiting").unwrap();
+        })
+        .unwrap();
+        assert_eq!(
+            fs::read(store.state_path()).unwrap(),
+            b"created while waiting"
+        );
+        assert_eq!(fs::read(old.join("state.json")).unwrap(), b"legacy");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn invalid_legacy_state_does_not_activate_new_state() {
+        let (root, old, store) = migration_dirs();
+        fs::write(old.join("state.json"), b"invalid json").unwrap();
+        assert!(migrate_from_legacy(&store, &old, false, || {}).is_err());
+        assert!(!store.state_path().exists());
+        assert_eq!(fs::read(old.join("state.json")).unwrap(), b"invalid json");
+        fs::remove_dir_all(root).unwrap();
     }
 }

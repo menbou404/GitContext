@@ -7,14 +7,15 @@ use gitcontext_core::{
     git_ops,
     models::{AppData, RepositoryRecord},
     operations,
-    storage::{default_config_dir, StateStore},
+    storage::{open_default_store, StateStore},
 };
 use preview::{Fingerprint, Operation, Previews, CHANGED};
 use rmcp::schemars;
 use rmcp::{
     handler::server::wrapper::Parameters,
     model::{
-        CallToolResult, ContentBlock, InitializeRequestParams, InitializeResult,
+        CallToolResult, ClientCapabilities, ContentBlock, ElicitRequestParams, ElicitationAction,
+        ElicitationSchema, Implementation, InitializeRequestParams, InitializeResult,
         ServerCapabilities, ServerConfig,
     },
     schemars::JsonSchema,
@@ -22,19 +23,13 @@ use rmcp::{
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::{
-    path::Path,
-    process::ExitCode,
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+use std::{path::Path, process::ExitCode, sync::Arc, time::Duration};
 
 #[derive(Clone)]
 struct GitContextServer {
     store: StateStore,
     tier: Tier,
     previews: Arc<Previews>,
-    client: Arc<Mutex<Option<ClientInfo>>>,
     trust_client_approval: bool,
     confirmation_timeout: Duration,
 }
@@ -77,6 +72,22 @@ fn confirmation_method(
 
 fn unreliable_client(name: &str, list: &[&str]) -> bool {
     list.iter().any(|item| item.eq_ignore_ascii_case(name))
+}
+
+fn client_from_metadata(
+    info: Option<Implementation>,
+    capabilities: Option<ClientCapabilities>,
+) -> Option<ClientInfo> {
+    info.map(|info| ClientInfo {
+        name: info.name.to_string(),
+        elicitation: capabilities
+            .and_then(|capabilities| capabilities.elicitation)
+            .is_some_and(|capability| capability.form.is_some() || capability.url.is_none()),
+    })
+}
+
+fn request_client(context: &rmcp::service::RequestContext<rmcp::RoleServer>) -> Option<ClientInfo> {
+    client_from_metadata(context.client_info(), context.client_capabilities())
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -458,18 +469,14 @@ impl GitContextServer {
     async fn local_action(
         &self,
         name: &'static str,
+        context: rmcp::service::RequestContext<rmcp::RoleServer>,
         task: impl FnOnce(&StateStore, &Previews, &mut AuditIds) -> Result<(Value, String), String>
             + Send
             + 'static,
     ) -> CallToolResult {
         let store = self.store.clone();
         let previews = self.previews.clone();
-        let client = self
-            .client
-            .lock()
-            .unwrap()
-            .as_ref()
-            .map(|info| info.name.clone());
+        let client = request_client(&context).map(|info| info.name);
         match tokio::task::spawn_blocking(move || {
             let mut ids = AuditIds::default();
             let result = task(&store, &previews, &mut ids);
@@ -545,7 +552,7 @@ impl GitContextServer {
         name: &'static str,
         operation: Operation,
         preview_id: String,
-        peer: rmcp::Peer<rmcp::RoleServer>,
+        context: rmcp::service::RequestContext<rmcp::RoleServer>,
         target: Option<String>,
         task: impl FnOnce(&StateStore, preview::Entry) -> Result<(Value, String), String>
             + Send
@@ -553,6 +560,8 @@ impl GitContextServer {
     ) -> CallToolResult {
         let store = self.store.clone();
         let previews = self.previews.clone();
+        let client = request_client(&context);
+        let client_name = client.as_ref().map(|info| info.name.as_str());
         let first = {
             let store = store.clone();
             let previews = previews.clone();
@@ -567,7 +576,7 @@ impl GitContextServer {
             Ok((Ok(entry), found)) => (entry, found),
             Ok((Err(error), found)) => {
                 return self
-                    .remote_result(name, &found, None, Err(error), true)
+                    .remote_result(name, &found, client_name, None, Err(error), true)
                     .await;
             }
             Err(_) => {
@@ -576,7 +585,6 @@ impl GitContextServer {
                 )])
             }
         };
-        let client = self.client.lock().unwrap().clone();
         let method = confirmation_method(
             self.trust_client_approval,
             client.as_ref().is_some_and(|info| info.elicitation),
@@ -588,7 +596,7 @@ impl GitContextServer {
             Ok(method) => method,
             Err(message) => {
                 return self
-                    .remote_result(name, &ids, None, Err(message.into()), true)
+                    .remote_result(name, &ids, client_name, None, Err(message.into()), true)
                     .await
             }
         };
@@ -601,16 +609,28 @@ impl GitContextServer {
                 Ok(prompt) => prompt,
                 Err(error) => {
                     return self
-                        .remote_result(name, &ids, Some(confirmation), Err(error), true)
+                        .remote_result(
+                            name,
+                            &ids,
+                            client_name,
+                            Some(confirmation),
+                            Err(error),
+                            true,
+                        )
                         .await
                 }
             };
-            let response = peer
-                .elicit_with_timeout::<Approval>(prompt, Some(self.confirmation_timeout))
-                .await;
-            if let Err(reason) = interpret_approval(response) {
+            if let Err(reason) = elicit_approval(&context, prompt, self.confirmation_timeout).await
+            {
                 return self
-                    .remote_result(name, &ids, Some(confirmation), Err(reason), true)
+                    .remote_result(
+                        name,
+                        &ids,
+                        client_name,
+                        Some(confirmation),
+                        Err(reason),
+                        true,
+                    )
                     .await;
             }
         }
@@ -642,13 +662,21 @@ impl GitContextServer {
         match checked {
             Ok(result) => {
                 let rejected = result.as_ref().err().is_some_and(|error| error == CHANGED);
-                self.remote_result(name, &ids, Some(confirmation), result, rejected)
-                    .await
+                self.remote_result(
+                    name,
+                    &ids,
+                    client_name,
+                    Some(confirmation),
+                    result,
+                    rejected,
+                )
+                .await
             }
             Err(_) => {
                 self.remote_result(
                     name,
                     &ids,
+                    client_name,
                     Some(confirmation),
                     Err("GitContext operation failed.".into()),
                     false,
@@ -749,6 +777,7 @@ impl GitContextServer {
         &self,
         name: &'static str,
         ids: &AuditIds,
+        client: Option<&str>,
         confirmation: Option<&str>,
         result: Result<(Value, String), String>,
         rejected: bool,
@@ -768,19 +797,13 @@ impl GitContextServer {
             } else {
                 "Remote operation failed"
             });
-        let client = self
-            .client
-            .lock()
-            .unwrap()
-            .as_ref()
-            .map(|info| info.name.clone());
         let record = audit::Audit::new(
             name,
             ids.repository_id.as_deref(),
             ids.profile_id.as_deref(),
             outcome,
             summary,
-            client.as_deref(),
+            client,
             confirmation,
         );
         let warning = audit::append(&self.store, &record)
@@ -822,6 +845,43 @@ fn interpret_approval(
         }
         Err(_) => Err("Confirmation failed.".into()),
     }
+}
+
+async fn elicit_approval(
+    context: &rmcp::service::RequestContext<rmcp::RoleServer>,
+    prompt: String,
+    timeout: Duration,
+) -> Result<(), String> {
+    use rmcp::service::ElicitationError;
+    let schema = ElicitationSchema::from_type::<Approval>()
+        .map_err(|_| "Confirmation failed.".to_string())?;
+    let response = context
+        .peer
+        .create_elicitation_with_timeout(
+            ElicitRequestParams::FormElicitationParams {
+                meta: None,
+                message: prompt,
+                requested_schema: schema,
+            },
+            Some(timeout),
+        )
+        .await
+        .map_err(ElicitationError::Service)
+        .and_then(|response| match response.action {
+            ElicitationAction::Accept => match response.content {
+                Some(content) => serde_json::from_value::<Approval>(content.clone())
+                    .map(Some)
+                    .map_err(|error| ElicitationError::ParseError {
+                        error,
+                        data: content,
+                    }),
+                None => Err(ElicitationError::NoContent),
+            },
+            ElicitationAction::Decline => Err(ElicitationError::UserDeclined),
+            ElicitationAction::Cancel => Err(ElicitationError::UserCancelled),
+            _ => Err(ElicitationError::NoContent),
+        });
+    interpret_approval(response)
 }
 
 #[tool_router]
@@ -1113,8 +1173,12 @@ impl GitContextServer {
             open_world_hint = false
         )
     )]
-    async fn add_repository(&self, Parameters(input): Parameters<FindInput>) -> CallToolResult {
-        self.local_action("add_repository", move |store, _, ids| {
+    async fn add_repository(
+        &self,
+        Parameters(input): Parameters<FindInput>,
+        context: rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> CallToolResult {
+        self.local_action("add_repository", context, move |store, _, ids| {
             let record = operations::add_repository(store, input.path)?;
             ids.repository_id = Some(record.id.clone());
             let data = load(store)?;
@@ -1207,9 +1271,9 @@ impl GitContextServer {
     async fn push(
         &self,
         Parameters(input): Parameters<PreviewIdInput>,
-        peer: rmcp::Peer<rmcp::RoleServer>,
+        context: rmcp::service::RequestContext<rmcp::RoleServer>,
     ) -> CallToolResult {
-        self.remote_action("push", Operation::Push, input.preview_id, peer, None, |store, entry| {
+        self.remote_action("push", Operation::Push, input.preview_id, context, None, |store, entry| {
             let result = operations::push_repository(store, entry.repository_id.clone(), entry.profile_id.clone())?;
             Ok((json!({ "repositoryId": entry.repository_id, "profileId": entry.profile_id, "branch": result.branch, "origin": result.remote_url, "detail": result.detail.map(|detail| scrub_error(detail, store)) }), format!("Pushed branch: {}", result.branch)))
         }).await
@@ -1227,9 +1291,9 @@ impl GitContextServer {
     async fn create_pull_request(
         &self,
         Parameters(input): Parameters<CreatePullRequestToolInput>,
-        peer: rmcp::Peer<rmcp::RoleServer>,
+        context: rmcp::service::RequestContext<rmcp::RoleServer>,
     ) -> CallToolResult {
-        self.remote_action("create_pull_request", Operation::CreatePullRequest, input.preview_id, peer, None, move |store, entry| {
+        self.remote_action("create_pull_request", Operation::CreatePullRequest, input.preview_id, context, None, move |store, entry| {
             let Fingerprint::CreatePullRequest { base, .. } = &entry.fingerprint else { return Err(CHANGED.into()); };
             let result = operations::create_pull_request(store, gitcontext_core::github::CreatePullRequestInput { repository_id: entry.repository_id.clone(), profile_id: entry.profile_id.clone(), base_branch: base.clone(), title: input.title, body: input.body, draft: input.draft })?;
             Ok((json!({ "repositoryId": entry.repository_id, "profileId": entry.profile_id, "branch": result.branch, "baseBranch": result.base_branch, "number": result.number, "url": result.url, "existing": result.existing }), format!("PR #{}; branch: {}", result.number, result.branch)))
@@ -1248,7 +1312,7 @@ impl GitContextServer {
     async fn merge_pull_request(
         &self,
         Parameters(input): Parameters<MergeToolInput>,
-        peer: rmcp::Peer<rmcp::RoleServer>,
+        context: rmcp::service::RequestContext<rmcp::RoleServer>,
     ) -> CallToolResult {
         if !matches!(input.strategy.as_str(), "squash" | "merge" | "rebase") {
             return CallToolResult::error(vec![ContentBlock::text(
@@ -1256,7 +1320,7 @@ impl GitContextServer {
             )]);
         }
         let target = format!("merge strategy: {}", input.strategy);
-        self.remote_action("merge_pull_request", Operation::Merge, input.preview_id, peer, Some(target), move |store, entry| {
+        self.remote_action("merge_pull_request", Operation::Merge, input.preview_id, context, Some(target), move |store, entry| {
             let Fingerprint::Merge { number, head_oid, .. } = &entry.fingerprint else { return Err(CHANGED.into()); };
             let result = operations::merge_pull_request(store, gitcontext_core::github::MergePullRequestInput { repository_id: entry.repository_id.clone(), profile_id: entry.profile_id.clone(), number: *number, strategy: input.strategy, expected_head_oid: head_oid.clone() })?;
             Ok((json!({ "repositoryId": entry.repository_id, "profileId": entry.profile_id, "number": result.number, "url": result.url, "strategy": result.strategy, "mergedAt": result.merged_at }), format!("Merged PR #{}; method: {}", result.number, result.strategy)))
@@ -1275,9 +1339,9 @@ impl GitContextServer {
     async fn clone_repository(
         &self,
         Parameters(input): Parameters<PreviewIdInput>,
-        peer: rmcp::Peer<rmcp::RoleServer>,
+        context: rmcp::service::RequestContext<rmcp::RoleServer>,
     ) -> CallToolResult {
-        self.remote_action("clone_repository", Operation::Clone, input.preview_id, peer, None, |store, entry| {
+        self.remote_action("clone_repository", Operation::Clone, input.preview_id, context, None, |store, entry| {
             let Fingerprint::Clone { url, parent, .. } = &entry.fingerprint else { return Err(CHANGED.into()); };
             let result = operations::clone_repository(store, entry.profile_id.clone(), url.clone(), parent.clone())?;
             Ok((json!({ "repositoryId": result.repository.id, "profileId": entry.profile_id, "repository": output::RepositoryDto::new(&result.repository, &result.data) }), "Repository cloned".into()))
@@ -1296,9 +1360,9 @@ impl GitContextServer {
     async fn publish_repository(
         &self,
         Parameters(input): Parameters<PreviewIdInput>,
-        peer: rmcp::Peer<rmcp::RoleServer>,
+        context: rmcp::service::RequestContext<rmcp::RoleServer>,
     ) -> CallToolResult {
-        self.remote_action("publish_repository", Operation::Publish, input.preview_id, peer, None, |store, entry| {
+        self.remote_action("publish_repository", Operation::Publish, input.preview_id, context, None, |store, entry| {
             let Fingerprint::Publish { name, description, visibility, branch, .. } = &entry.fingerprint else { return Err(CHANGED.into()); };
             let result = operations::publish_repository(store, entry.repository_id.clone(), entry.profile_id.clone(), name.clone(), visibility.clone(), description.clone())?;
             Ok((json!({ "repositoryId": entry.repository_id, "profileId": entry.profile_id, "branch": branch, "url": result.repository_url, "visibility": visibility }), format!("Published branch: {branch}")))
@@ -1314,8 +1378,12 @@ impl GitContextServer {
             open_world_hint = false
         )
     )]
-    async fn apply_profile(&self, Parameters(input): Parameters<PreviewIdInput>) -> CallToolResult {
-        self.local_action("apply_profile", move |store, previews, ids| {
+    async fn apply_profile(
+        &self,
+        Parameters(input): Parameters<PreviewIdInput>,
+        context: rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> CallToolResult {
+        self.local_action("apply_profile", context, move |store, previews, ids| {
             let entry = consume_verified(previews, store, &input.preview_id, Operation::Apply, ids)?;
             let keys = match &entry.fingerprint { Fingerprint::Apply { changes, .. } => changes.iter().map(|c| c.0.clone()).collect::<Vec<_>>(), _ => unreachable!() };
             let data = operations::apply_profile(store, entry.repository_id.clone(), entry.profile_id.clone())?;
@@ -1333,8 +1401,12 @@ impl GitContextServer {
             open_world_hint = false
         )
     )]
-    async fn create_branch(&self, Parameters(input): Parameters<BranchInput>) -> CallToolResult {
-        self.local_action("create_branch", move |store, previews, ids| {
+    async fn create_branch(
+        &self,
+        Parameters(input): Parameters<BranchInput>,
+        context: rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> CallToolResult {
+        self.local_action("create_branch", context, move |store, previews, ids| {
             let entry = consume_verified(previews, store, &input.preview_id, Operation::CreateBranch, ids)?;
             let result = operations::create_branch(store, entry.repository_id.clone(), entry.profile_id.clone(), input.branch_name)?;
             Ok((json!({"repositoryId": entry.repository_id, "profileId": entry.profile_id, "branch": result.branch}), format!("Branch: {}", result.branch)))
@@ -1350,8 +1422,12 @@ impl GitContextServer {
             open_world_hint = false
         )
     )]
-    async fn commit(&self, Parameters(input): Parameters<CommitInput>) -> CallToolResult {
-        self.local_action("commit", move |store, previews, ids| {
+    async fn commit(
+        &self,
+        Parameters(input): Parameters<CommitInput>,
+        context: rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> CallToolResult {
+        self.local_action("commit", context, move |store, previews, ids| {
             let entry = consume_verified(previews, store, &input.preview_id, Operation::Commit, ids)?;
             let changes = match &entry.fingerprint { Fingerprint::Commit { changes, .. } => changes, _ => unreachable!() };
             let result = operations::commit_previewed_changes(store, entry.repository_id.clone(), entry.profile_id.clone(), input.message, changes)?;
@@ -1368,8 +1444,12 @@ impl GitContextServer {
             open_world_hint = true
         )
     )]
-    async fn pull(&self, Parameters(input): Parameters<PreviewIdInput>) -> CallToolResult {
-        self.local_action("pull", move |store, previews, ids| {
+    async fn pull(
+        &self,
+        Parameters(input): Parameters<PreviewIdInput>,
+        context: rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> CallToolResult {
+        self.local_action("pull", context, move |store, previews, ids| {
             let entry = consume_verified(previews, store, &input.preview_id, Operation::Pull, ids)?;
             let result = operations::pull_repository(store, entry.repository_id.clone(), entry.profile_id.clone())?;
             let head = git_ops::head_commit(&record_path(store, &entry.repository_id)?)?;
@@ -1385,14 +1465,6 @@ impl ServerHandler for GitContextServer {
         request: InitializeRequestParams,
         context: rmcp::service::RequestContext<rmcp::RoleServer>,
     ) -> Result<InitializeResult, rmcp::ErrorData> {
-        *self.client.lock().unwrap() = Some(ClientInfo {
-            name: request.client_info.name.to_string(),
-            elicitation: request
-                .capabilities
-                .elicitation
-                .as_ref()
-                .is_some_and(|capability| capability.form.is_some() || capability.url.is_none()),
-        });
         context.peer.set_peer_info(request.clone());
         self.negotiate_initialize(&request)
     }
@@ -1473,18 +1545,17 @@ async fn main() -> ExitCode {
         }
         Ok(Some(options)) => options,
     };
-    let config_dir = match default_config_dir() {
-        Ok(path) => path,
+    let store = match open_default_store() {
+        Ok(store) => store,
         Err(message) => {
             eprintln!("{message}");
             return ExitCode::from(1);
         }
     };
     let server = GitContextServer {
-        store: StateStore::new(config_dir),
+        store,
         tier,
         previews: Arc::new(Previews::default()),
-        client: Arc::new(Mutex::new(None)),
         trust_client_approval,
         confirmation_timeout: if cfg!(debug_assertions) {
             std::env::var("GITCONTEXT_TEST_CONFIRMATION_TIMEOUT_MS")
@@ -1515,6 +1586,26 @@ async fn main() -> ExitCode {
 mod remote_tests {
     use super::*;
     use rmcp::service::{ElicitationError, ServiceError};
+
+    #[test]
+    fn request_metadata_selects_elicitation_only_with_form_capability() {
+        let info: Implementation = serde_json::from_value(json!({
+            "name": "ModernClient", "version": "1.0"
+        }))
+        .unwrap();
+        let form: ClientCapabilities = serde_json::from_value(json!({
+            "elicitation": {"form": {}}
+        }))
+        .unwrap();
+        let modern = client_from_metadata(Some(info.clone()), Some(form)).unwrap();
+        assert_eq!(modern.name, "ModernClient");
+        assert_eq!(
+            confirmation_method(false, modern.elicitation, false),
+            Ok(Confirmation::Elicitation)
+        );
+        let missing = client_from_metadata(Some(info), None).unwrap();
+        assert!(confirmation_method(false, missing.elicitation, false).is_err());
+    }
 
     #[test]
     fn confirmation_decision_table() {

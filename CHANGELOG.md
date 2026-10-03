@@ -20,11 +20,13 @@
 
 ### Changed
 
-- 開発版（debugビルド）のデータをインストーラー版と別のフォルダ（`app.gitcontext.dev`）に保存し、開発版では保存先を画面に表示
+- Windowsのデータ保存先をユーザーのホーム配下に変更し、旧AppData保存先から起動時に自動移行
+- 開発版（debugビルド）のデータをインストーラー版と別のフォルダ（Windowsでは`%USERPROFILE%\.gitcontext-dev`）に保存し、開発版では保存先を画面に表示
 - 状態ファイルの排他制御をプロセス間で有効なファイルロックに変更
 
 ### Fixed
 
+- MCPのクライアント情報とelicitation対応をリクエストごとに判定し、モダンプロトコルの`_meta`に対応
 - Profileから外したGitHubユーザー名・gh設定ディレクトリ・SSH鍵の設定が、再適用後もリポジトリのローカル設定に残る問題（適用前のプレビューに「削除」と表示し、GitContextが書いた`core.sshCommand`だけを削除）
 
 ### Planned

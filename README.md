@@ -97,7 +97,7 @@ npm run tauri dev
 
 ### 開発版のデータ
 
-`npm run tauri dev`などのdebugビルドは、インストーラー版（`%APPDATA%\app.gitcontext.desktop`）とは別の`%APPDATA%\app.gitcontext.dev`にProfileなどを保存します。インストーラー版をアンインストールしても、開発版のデータは消えません。環境変数`GITCONTEXT_DATA_DIR`に絶対パスを指定すると、保存先を変更できます。
+Windowsでは、配布版は`%USERPROFILE%\.gitcontext`、`npm run tauri dev`などのdebugビルドは`%USERPROFILE%\.gitcontext-dev`にProfileなどを保存します。旧保存先（配布版の`%APPDATA%\app.gitcontext.desktop`、開発版の`%APPDATA%\app.gitcontext.dev`）にデータがあり、新保存先に`state.json`がない場合、GUIまたはMCPの起動時に自動移行します。旧データはそのまま残ります。macOSとLinuxの保存先は従来どおりです。環境変数`GITCONTEXT_DATA_DIR`に絶対パスを指定すると、保存先を変更できます（自動移行は行いません）。
 
 状態ファイルは保存のたびに、直前の内容を同じフォルダの`backups\state-<日時>.json`へ残します（最新20世代）。誤って変更・削除した場合は、アプリを終了してから目的のバックアップを`state.json`としてコピーしてください。
 
@@ -112,7 +112,7 @@ cargo build --manifest-path src-tauri\Cargo.toml -p gitcontext-mcp
 claude mcp add gitcontext -- "<リポジトリのパス>\src-tauri\target\debug\gitcontext-mcp.exe"
 ```
 
-debugビルドのMCPサーバーは、開発版のデータ（`%APPDATA%\app.gitcontext.dev`）を参照します。
+debugビルドのMCPサーバーは、開発版のデータ（Windowsでは`%USERPROFILE%\.gitcontext-dev`）を参照します。
 
 ### ブラウザ用プレビュー
 

@@ -125,6 +125,30 @@ impl Rpc {
             json!({ "name": name, "arguments": arguments }),
         )
     }
+
+    fn modern_request(
+        &mut self,
+        id: u32,
+        method: &str,
+        mut params: Value,
+        capabilities: Value,
+    ) -> Value {
+        params["_meta"] = json!({
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+            "io.modelcontextprotocol/clientInfo": {"name": "modern-test", "version": "1"},
+            "io.modelcontextprotocol/clientCapabilities": capabilities
+        });
+        self.request(id, method, params)
+    }
+
+    fn modern_call(&mut self, id: u32, name: &str, arguments: Value, capabilities: Value) -> Value {
+        self.modern_request(
+            id,
+            "tools/call",
+            json!({"name": name, "arguments": arguments}),
+            capabilities,
+        )
+    }
 }
 
 fn initialize(rpc: &mut Rpc) {
@@ -614,6 +638,85 @@ fn remote_without_elicitation_is_rejected_and_audited() {
     assert_eq!(last["tool"], "push");
     assert_eq!(last["outcome"], "rejected");
     assert!(last["confirmation"].is_null());
+}
+
+#[test]
+fn modern_requests_use_per_request_elicitation_capability() {
+    for supports_form in [true, false] {
+        let fixture = Fixture::new();
+        let (_, data_dir) = push_fixture(&fixture);
+        let mut rpc = Rpc::start_tier(&data_dir, "remote");
+        let capabilities = if supports_form {
+            json!({"elicitation":{"form":{}}})
+        } else {
+            json!({})
+        };
+        let discovered = rpc.modern_request(1, "server/discover", json!({}), capabilities.clone());
+        assert_eq!(
+            discovered["_meta"]["io.modelcontextprotocol/serverInfo"]["name"],
+            "rmcp"
+        );
+        let tools = rpc.modern_request(2, "tools/list", json!({}), capabilities.clone());
+        assert!(tools["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|tool| tool["name"] == "push"));
+        let assignment = rpc.modern_call(
+            3,
+            "preview_assignment",
+            json!({"repositoryId":"repo-1","profileId":"fictional"}),
+            capabilities.clone(),
+        );
+        let assignment_id = assignment["structuredContent"]["previewId"]
+            .as_str()
+            .unwrap();
+        let applied = rpc.modern_call(
+            4,
+            "apply_profile",
+            json!({"previewId":assignment_id}),
+            capabilities.clone(),
+        );
+        assert_eq!(applied["isError"], false, "{applied}");
+        let preview = rpc.modern_call(
+            5,
+            "preview_push",
+            json!({"repositoryId":"repo-1"}),
+            capabilities.clone(),
+        );
+        let preview_id = preview["structuredContent"]["previewId"].as_str().unwrap();
+        let mut params = json!({"name":"push","arguments":{"previewId":preview_id}});
+        params["_meta"] = json!({
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+            "io.modelcontextprotocol/clientInfo": {"name": "modern-test", "version": "1"},
+            "io.modelcontextprotocol/clientCapabilities": capabilities
+        });
+        rpc.send(json!({"jsonrpc":"2.0","id":6,"method":"tools/call","params":params}));
+        let first = rpc.read_message();
+        if supports_form {
+            assert_eq!(first["method"], "elicitation/create", "{first}");
+            rpc.send(json!({"jsonrpc":"2.0","id":first["id"],"result":{"action":"decline"}}));
+            let response = rpc.read_message();
+            assert_eq!(response["id"], 6);
+        } else {
+            assert_eq!(first["id"], 6, "{first}");
+            assert!(first["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("cannot show GitContext's confirmation prompt"));
+        }
+        let audit = fs::read_to_string(data_dir.join("mcp-audit.jsonl")).unwrap();
+        let last: Value = serde_json::from_str(audit.lines().last().unwrap()).unwrap();
+        assert_eq!(last["client"], "modern-test");
+        assert_eq!(
+            last["confirmation"],
+            if supports_form {
+                json!("elicitation")
+            } else {
+                json!(null)
+            }
+        );
+    }
 }
 
 #[test]

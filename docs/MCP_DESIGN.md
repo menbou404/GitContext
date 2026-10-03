@@ -44,8 +44,8 @@ src-tauri/                          (workspace root + Tauri app package)
 
 coreの`StateStore`は状態ディレクトリを引数で受け取り、`AppHandle`に依存しない。
 
-- GUIは従来どおりTauriの`app_config_dir()`から`StateStore`を作る。
-- MCPサーバーは`default_config_dir()`で同じ場所（Windowsでは`%APPDATA%\app.gitcontext.desktop`、Tauriの`identifier`と同じ）を解決する。
+- GUIとMCPサーバーはcoreの共通関数で`StateStore`を作り、Windowsでは配布版を`%USERPROFILE%\.gitcontext`、開発版を`%USERPROFILE%\.gitcontext-dev`に保存する。
+- パッケージアプリから起動した子プロセスではAppDataへの書き込みが別の場所に振り替えられることがある。ホーム配下に置くことでGUIとMCPが同じデータを参照する。旧AppData保存先からは`state.json`が新保存先にない場合だけ自動移行し、旧データは残す。
 - テストでは一時ディレクトリを渡す。
 
 ### プロセス間の排他
@@ -191,7 +191,8 @@ MCPのelicitationを使い、`remote`の実行前にサーバーからクライ�
 | elicitationに対応していない、または不安定な一覧にある | 実行しない。AI連携画面で設定を見直すよう案内する | クライアントの確認に任せて実行する |
 
 - elicitationの「対応」は、フォーム形式の確認を宣言している場合だけとみなす。URLを開かせる形式だけを宣言しているクライアントは「対応していない」として扱う。
-- **不安定な一覧**: 対応を宣言しながら確認フォームを表示しないことが分かっているクライアントを、initializeの`clientInfo.name`で判定する一覧。サーバーには区別がつかない「自動の拒否」を人の拒否と取り違えないためのもので、アプリの更新に合わせて見直す。
+- クライアント名とelicitation対応はリクエストごとに判定する。モダンプロトコルでは各リクエストの`_meta`にある`io.modelcontextprotocol/clientInfo`と`io.modelcontextprotocol/clientCapabilities`を使い、レガシープロトコルでは`initialize`の情報にフォールバックする。監査ログのクライアント名にも同じ情報を使う。
+- **不安定な一覧**: 対応を宣言しながら確認フォームを表示しないことが分かっているクライアントを、当該リクエストの`clientInfo.name`で判定する一覧。サーバーには区別がつかない「自動の拒否」を人の拒否と取り違えないためのもので、アプリの更新に合わせて見直す。
 - `--trust-client-approval`は、GUIの「AI連携」画面で、確認画面を出せないクライアントに「GitHub操作まで」を選び、警告に同意したときだけ登録時に付ける（[UI_DESIGN.md](UI_DESIGN.md)参照）。画面ができるまでは手で付ける。
 - どの方法でも、プレビューIDの照合は必ず行う。
 - 監査ログには、確認の方法（`elicitation`／`client`）と結果を記録する。クライアントに任せた場合は、実行結果にもその旨を含める。
