@@ -12,6 +12,11 @@ pub enum Operation {
     Commit,
     Pull,
     CreateBranch,
+    Push,
+    CreatePullRequest,
+    Merge,
+    Clone,
+    Publish,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -36,6 +41,40 @@ pub enum Fingerprint {
         branch: String,
         head: String,
         base_branch: String,
+    },
+    Push {
+        branch: String,
+        head: String,
+        origin: String,
+        upstream: Option<String>,
+        dirty: bool,
+    },
+    CreatePullRequest {
+        branch: String,
+        head: String,
+        base: String,
+        pushed: bool,
+        ahead: u64,
+        clean: bool,
+        existing: Option<u64>,
+    },
+    Merge {
+        number: u64,
+        head_oid: String,
+        merge_state: String,
+    },
+    Clone {
+        url: String,
+        parent: String,
+        absent: bool,
+    },
+    Publish {
+        branch: String,
+        head: String,
+        name: String,
+        description: Option<String>,
+        visibility: String,
+        username: String,
     },
 }
 

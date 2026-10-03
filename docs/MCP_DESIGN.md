@@ -107,13 +107,16 @@ MCPのツールは危険度で3段階に分ける。サーバー起動時の`--m
 
 ### Tier `remote`
 
-| ツール | 内容 | 必須入力 |
-|---|---|---|
-| `push` | 現在ブランチを通常push | `previewId` |
-| `create_pull_request` | PR作成（既存PRがあれば再利用） | `previewId`、タイトル、本文、Draft |
-| `merge_pull_request` | 先頭commitを固定してmerge | `previewId`、merge方法 |
-| `clone_repository` | ProfileのSSH鍵でclone、登録、適用 | Profile、SSH URL、保存先 |
-| `publish_repository` | GitHubリポジトリ作成と初回push | `previewId`、名前、説明、公開範囲 |
+| ツール | 内容 | 必須入力 | previewIdを発行するプレビュー |
+|---|---|---|---|
+| `push` | 現在ブランチを通常push | `previewId` | `preview_push` |
+| `create_pull_request` | PR作成（既存PRがあれば再利用） | `previewId`、タイトル、本文、Draft | `preview_pull_request`（作業ブランチ上のとき） |
+| `merge_pull_request` | 先頭commitを固定してmerge | `previewId`、merge方法 | `preview_merge`（PR番号を指定） |
+| `clone_repository` | ProfileのSSH鍵でclone、登録、適用 | `previewId` | `preview_clone`（Profile、SSH URL、保存先を指定） |
+| `publish_repository` | GitHubリポジトリ作成と初回push | `previewId` | `preview_publish`（名前、説明、公開範囲を指定） |
+
+- `preview_pull_request`は、既定ブランチ上なら`create_branch`用、作業ブランチ上なら`create_pull_request`用の`previewId`を発行する。
+- `preview_merge`、`preview_clone`、`preview_publish`は`remote`のときだけ公開するプレビューで、実行に必要な入力をプレビュー時に固定する。
 
 ### MCPでは提供しない操作
 
@@ -159,24 +162,43 @@ GUIでの承認は行わない。MCPサーバー単体で使う人がいるた�
 
 MCPのelicitationを使い、`remote`の実行前にサーバーからクライアントへ確認を依頼する。クライアントは画面で人に確認し、その結果をサーバーへ返す。
 
-- 確認の文面には、操作の種類、Profile、GitHubユーザー名、リポジトリ、ブランチ、対象（commit ID、PR番号、merge方法など）を表示する。
-- 人が承認した場合だけ実行する。拒否やキャンセルの場合は、何もせずに「ユーザーが拒否しました」と返す。
+- 確認の文面には、操作の種類、Profile、GitHubユーザー名、リポジトリ、ブランチ、対象（commit ID、PR番号、merge方法、公開範囲など）を表示する。
+- 人が承認した場合だけ実行する。拒否、キャンセル、**2分以内に応答がない場合**は、何もせずに理由を返す（応答しないまま止まるクライアントがあるため）。
 - AIが確認を代わりに承認できないよう、確認の結果はツールの引数ではなく、elicitationの応答だけで受け取る。
+- 人が確認している間に状態が変わることがあるため、承認を受けた後にもう一度指紋を照合してから実行する。
 
-### elicitationに対応していないクライアント
+### クライアントの対応状況
 
-クライアントによって、elicitationに対応しているかどうかは異なる。
+2026年10月時点の公開情報では、elicitationへの対応はクライアントによって異なる。
 
-| 起動オプション | elicitation非対応クライアントでの`remote`の扱い |
+| クライアント | 状況 |
 |---|---|
-| なし（既定） | クライアント自身のツール実行確認に任せて実行する |
-| `--require-confirmation` | 実行を拒否し、elicitation対応クライアントを使うよう案内する |
+| Claude Code（CLI） | 対応 |
+| Claude Code（デスクトップのCodeタブ）、Codex Desktop | 確認フォームが表示されずに閉じられるという報告がある |
+| Codex CLI | 対応が進行中。自動で拒否を返す場合があるという報告がある |
+| Claude Desktop | 非対応 |
+| Claude Cowork | 対応を宣言するが確認依頼を無視し、呼び出しが止まるという報告がある |
 
-どちらの場合もプレビューIDの照合は必ず行う。
+版によって変わるため、実際の動作は各クライアントで確認し、この表と下記の一覧を更新する。
+
+### 確認の方法の決め方
+
+既定では、人の確認なしにGitHubが変更されないようにする。そのうえで、確認画面を出せないクライアントでも、利用者が警告を理解して選んだ場合に限り、クライアント自身の確認に任せられるようにする。
+
+| クライアントの状態 | `--trust-client-approval`なし（既定） | `--trust-client-approval`あり |
+|---|---|---|
+| elicitationに対応し、不安定な一覧にない | elicitationで確認する | elicitationを使わず、クライアントの確認に任せる |
+| elicitationに対応していない、または不安定な一覧にある | 実行しない。AI連携画面で設定を見直すよう案内する | クライアントの確認に任せて実行する |
+
+- elicitationの「対応」は、フォーム形式の確認を宣言している場合だけとみなす。URLを開かせる形式だけを宣言しているクライアントは「対応していない」として扱う。
+- **不安定な一覧**: 対応を宣言しながら確認フォームを表示しないことが分かっているクライアントを、initializeの`clientInfo.name`で判定する一覧。サーバーには区別がつかない「自動の拒否」を人の拒否と取り違えないためのもので、アプリの更新に合わせて見直す。
+- `--trust-client-approval`は、GUIの「AI連携」画面で、確認画面を出せないクライアントに「GitHub操作まで」を選び、警告に同意したときだけ登録時に付ける（[UI_DESIGN.md](UI_DESIGN.md)参照）。画面ができるまでは手で付ける。
+- どの方法でも、プレビューIDの照合は必ず行う。
+- 監査ログには、確認の方法（`elicitation`／`client`）と結果を記録する。クライアントに任せた場合は、実行結果にもその旨を含める。
 
 ### その他
 
-- ツールにはMCPのannotationsを付ける。`read`は`readOnlyHint: true`、`remote`は`destructiveHint: true`と`openWorldHint: true`とする。
+- ツールにはMCPのannotationsを付ける。`read`は`readOnlyHint: true`、`remote`の実行ツールは`destructiveHint: true`と`openWorldHint: true`とする。
 - 実行ツールの結果には、実行したこと（Profile、ブランチ、commit ID、PR URLなど）を必ず含める。
 
 ## プロンプトインジェクションと入力検証
@@ -240,6 +262,7 @@ args = ["--max-tier", "remote"]
 - まずは既定の`read`で使い始め、必要になったら`local`、`remote`へ広げることを推奨する。
 - CodexのMCPサーバーはCodexのサンドボックスの外で動く。サンドボックスでGit操作を制限していても、`remote`を公開すればMCP経由でpushやmergeができる点に注意する。
 - GitContext自体の開発では、[CONTRIBUTING.md](../CONTRIBUTING.md)の役割分担に合わせて、Codexには`read`だけを設定する。
+- `remote`を、確認画面を出せないクライアント（上記「クライアントの対応状況」）で使うには`--trust-client-approval`が必要になる。付けた場合、GitHub操作の前の確認はクライアント自身の確認だけになる。クライアント側で自動承認を有効にしていると、確認なしにpushやmergeが実行されるため、GitContextのツールには毎回確認を出す設定にすること。
 
 ## 配布
 
@@ -265,7 +288,7 @@ args = ["--max-tier", "remote"]
   - プレビュー後にファイルが増えた場合
 - ロックについては、GUIとMCPの同時書き込みを模したテストで、更新が失われないことを確認する。
 - `--max-tier`より上のツールが、一覧に出ず、呼び出しも拒否されることを確認する。
-- elicitationについては、承認・拒否・キャンセル・非対応クライアント（`--require-confirmation`の有無）の各場合をテストする。
+- elicitationについては、承認・拒否・キャンセル・時間切れ・非対応クライアント・不安定な一覧にあるクライアント（`--trust-client-approval`の有無）の各場合と、承認後の指紋の再照合をテストする。
 - 実際のクライアント（Claude Code、Codex CLI、Claude Desktop、Codex Desktop）で、接続とツール一覧の取得を手動で確認する。
 
 ## 段階的な実装計画
@@ -275,7 +298,7 @@ args = ["--max-tier", "remote"]
 | 1 | `gitcontext-core`の切り出し、保存先の解決、プロセス間ロック | 動作を変えずに既存テストが通る。GUIの挙動が変わらない | 完了 |
 | 2 | `gitcontext-mcp`の`read`ツール | 4つのクライアントから状態とプレビューを取得できる | 実装済み。stdioの結合テストと実データでの動作を確認。各クライアントからの接続確認は未実施 |
 | 3 | プレビューID、監査ログ、`local`ツール | 拒否ケースのテストが通る | 実装済み。`pull`の既知の制限あり（上記） |
-| 4 | elicitationによる確認と`remote`ツール | GUIと同じ検証を通り、確認の各ケースのテストが通る | 未着手 |
+| 4 | elicitationによる確認と`remote`ツール | GUIと同じ検証を通り、確認の各ケースのテストが通る | 実装済み。実際のクライアントでの確認画面の動作と、不安定な一覧の中身は未確認 |
 | 5 | インストーラーへの同梱、GUIの「AI連携」画面、README（クライアント別の設定例） | 配布物から設定できる | 未着手 |
 
 各段階を1つのPRとする。
@@ -286,7 +309,8 @@ args = ["--max-tier", "remote"]
 - **GUIでの承認:** 行わない。MCPサーバー単体で動作させ、人の確認はelicitationで行う。
 - **`previewId`の保存先:** サーバープロセスのメモリとする。
 - **`remote`の範囲:** push、PR作成、merge、clone、GitHub公開をすべて提供する。ただし`--max-tier remote`を明示して起動した場合だけ公開する。
+- **確認画面を出せないクライアント:** 既定では`remote`を実行しない。警告に同意したうえで`--trust-client-approval`を付けた場合だけ、クライアント自身の確認に任せる（2026年10月決定。当初案の「既定でクライアントの確認に任せ、`--require-confirmation`で拒否する」から変更）。
 
 ## 未決事項
 
-- **elicitationの対応状況:** 各クライアントの対応状況を段階4の前に確認し、READMEに記載する。
+- **不安定な一覧の中身:** 各クライアントの`clientInfo.name`と実際の動作を確認し、一覧と「クライアントの対応状況」の表を更新する。

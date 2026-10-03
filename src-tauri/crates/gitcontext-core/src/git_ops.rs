@@ -251,6 +251,14 @@ pub fn clone_repository(
     Ok(repository)
 }
 
+pub fn validate_clone_profile(profile: &Profile) -> Result<(), String> {
+    desired_config(profile)?
+        .into_iter()
+        .find_map(|(key, value)| (key == "core.sshCommand").then_some(value).flatten())
+        .ok_or_else(|| "Choose an SSH private key for this Profile before cloning.".to_string())?;
+    Ok(())
+}
+
 pub fn build_preview(
     repository: &RepositoryRecord,
     profile: &Profile,

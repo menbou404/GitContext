@@ -15,6 +15,7 @@
 - 状態ファイルの自動バックアップ（保存・データ移行の前に最新20世代を保持）
 - AIエージェント向けMCPサーバー`gitcontext-mcp`（開発中・読み取り専用）：Profileとリポジトリの一覧、作業フォルダからのリポジトリ検索、状態とIdentity一致の確認、Profile候補の提案、各種プレビュー、Pull Request一覧。SSH鍵はファイル名だけ、gh設定ディレクトリは返さない
 - MCPサーバーの`--max-tier local`：リポジトリ登録、プロファイル適用、ブランチ作成、commit、pull。実行はプレビューIDで固定し（1回限り・10分で失効・実行直前に状態を再照合）、commitはプレビューしたファイルだけを対象にする。変更の操作は監査ログ`mcp-audit.jsonl`に記録
+- MCPサーバーの`--max-tier remote`：push、Pull Request作成、merge、clone、GitHub公開（`preview_merge`・`preview_clone`・`preview_publish`を追加）。実行前にelicitationで人の確認を求め、拒否・キャンセル・2分の時間切れでは実行しない。承認後にも状態を再照合する。確認画面を出せないクライアントでは既定で実行せず、`--trust-client-approval`で明示した場合だけクライアントの確認に任せる
 - 開発者向け：個人情報・秘密情報のcommitを防ぐGit hook（ローカル専用の禁止語リスト対応）と、CIでのプライバシー・秘密情報スキャン
 
 ### Changed

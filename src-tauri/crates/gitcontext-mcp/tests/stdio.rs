@@ -58,8 +58,26 @@ impl Rpc {
     }
 
     fn start_tier(data_dir: &Path, tier: &str) -> Self {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_gitcontext-mcp"))
-            .args(["--max-tier", tier])
+        Self::start_with(data_dir, tier, false, None)
+    }
+
+    fn start_with(data_dir: &Path, tier: &str, trust: bool, timeout_ms: Option<u64>) -> Self {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_gitcontext-mcp"));
+        command.args(["--max-tier", tier]);
+        command.env("USERPROFILE", data_dir.parent().unwrap());
+        if tier == "remote" {
+            command.env("GITCONTEXT_TEST_STOP_BEFORE_REMOTE_EXECUTION", "1");
+        }
+        if trust {
+            command.arg("--trust-client-approval");
+        }
+        if let Some(timeout_ms) = timeout_ms {
+            command.env(
+                "GITCONTEXT_TEST_CONFIRMATION_TIMEOUT_MS",
+                timeout_ms.to_string(),
+            );
+        }
+        let mut child = command
             .env("GITCONTEXT_DATA_DIR", data_dir)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -88,12 +106,16 @@ impl Rpc {
 
     fn request_any(&mut self, id: u32, method: &str, params: Value) -> Value {
         self.send(json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params }));
+        let response = self.read_message();
+        assert_eq!(response["id"], id);
+        response
+    }
+
+    fn read_message(&mut self) -> Value {
         let mut line = String::new();
         self.stdout.read_line(&mut line).unwrap();
         assert!(!line.is_empty(), "server closed stdout");
-        let response: Value = serde_json::from_str(&line).unwrap();
-        assert_eq!(response["id"], id);
-        response
+        serde_json::from_str(&line).unwrap()
     }
 
     fn call(&mut self, id: u32, name: &str, arguments: Value) -> Value {
@@ -106,11 +128,15 @@ impl Rpc {
 }
 
 fn initialize(rpc: &mut Rpc) {
+    initialize_with_capabilities(rpc, json!({}));
+}
+
+fn initialize_with_capabilities(rpc: &mut Rpc, capabilities: Value) {
     rpc.request(
         1,
         "initialize",
         json!({
-            "protocolVersion": "2025-03-26", "capabilities": {},
+            "protocolVersion": "2025-11-25", "capabilities": capabilities,
             "clientInfo": { "name": "fictional-test", "version": "1" }
         }),
     );
@@ -279,9 +305,9 @@ fn read_tools_over_stdio() {
 }
 
 #[test]
-fn unavailable_tier_exits_two() {
+fn invalid_tier_exits_two() {
     let output = Command::new(env!("CARGO_BIN_EXE_gitcontext-mcp"))
-        .args(["--max-tier", "remote"])
+        .args(["--max-tier", "invalid"])
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(2));
@@ -423,6 +449,275 @@ fn local_preview_execution_and_audit() {
 
 fn uuid_version(id: &str) -> Option<char> {
     id.chars().nth(14)
+}
+
+fn push_fixture(fixture: &Fixture) -> (PathBuf, PathBuf) {
+    let (repo, data_dir) = local_fixture(fixture);
+    let ssh_dir = fixture.root.join(".ssh");
+    fs::create_dir_all(&ssh_dir).unwrap();
+    let key = ssh_dir.join("fictional-key");
+    fs::write(&key, "test key placeholder").unwrap();
+    let mut state: Value =
+        serde_json::from_str(&fs::read_to_string(data_dir.join("state.json")).unwrap()).unwrap();
+    state["profiles"][0]["sshKeyPath"] = json!(key);
+    state["profiles"][0]["githubUsername"] = json!("fictional");
+    fs::write(data_dir.join("state.json"), state.to_string()).unwrap();
+    git(&repo, &["config", "user.name", "Sample Person"]);
+    git(&repo, &["config", "user.email", "sample@example.com"]);
+    fs::write(repo.join("readme.txt"), "fixture").unwrap();
+    git(&repo, &["add", "readme.txt"]);
+    git(&repo, &["commit", "-m", "Initial fixture"]);
+    git(
+        &repo,
+        &[
+            "config",
+            "remote.origin.url",
+            "git@github.com:fictional/repo.git",
+        ],
+    );
+    (repo, data_dir)
+}
+
+fn applied_push_preview(rpc: &mut Rpc) -> String {
+    let assignment = rpc.call(
+        2,
+        "preview_assignment",
+        json!({"repositoryId":"repo-1","profileId":"fictional"}),
+    );
+    let assignment_id = assignment["structuredContent"]["previewId"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{assignment}"));
+    let applied = rpc.call(3, "apply_profile", json!({"previewId":assignment_id}));
+    assert_eq!(applied["isError"], false, "{applied}");
+    let preview = rpc.call(4, "preview_push", json!({"repositoryId":"repo-1"}));
+    assert_eq!(preview["isError"], false, "{preview}");
+    preview["structuredContent"]["previewId"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+#[test]
+fn remote_tier_exposes_only_remote_operations() {
+    let fixture = Fixture::new();
+    let (_, data_dir) = local_fixture(&fixture);
+    for (tier, expected) in [("local", false), ("remote", true)] {
+        let mut rpc = Rpc::start_tier(&data_dir, tier);
+        initialize(&mut rpc);
+        let list = rpc.request(2, "tools/list", json!({}));
+        let names: Vec<_> = list["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|tool| tool["name"].as_str().unwrap())
+            .collect();
+        for name in [
+            "preview_merge",
+            "preview_clone",
+            "preview_publish",
+            "push",
+            "create_pull_request",
+            "merge_pull_request",
+            "clone_repository",
+            "publish_repository",
+        ] {
+            assert_eq!(names.contains(&name), expected, "{tier}: {name}");
+        }
+        if expected {
+            for tool in list["tools"].as_array().unwrap().iter().filter(|tool| {
+                [
+                    "push",
+                    "create_pull_request",
+                    "merge_pull_request",
+                    "clone_repository",
+                    "publish_repository",
+                ]
+                .contains(&tool["name"].as_str().unwrap())
+            }) {
+                assert_eq!(tool["annotations"]["readOnlyHint"], false);
+                assert_eq!(tool["annotations"]["destructiveHint"], true);
+                assert_eq!(tool["annotations"]["openWorldHint"], true);
+            }
+        }
+    }
+}
+
+#[test]
+fn push_preview_id_is_remote_only() {
+    for tier in ["local", "remote"] {
+        let fixture = Fixture::new();
+        let (_, data_dir) = push_fixture(&fixture);
+        let mut rpc = Rpc::start_tier(&data_dir, tier);
+        initialize(&mut rpc);
+        let assignment = rpc.call(
+            2,
+            "preview_assignment",
+            json!({"repositoryId":"repo-1","profileId":"fictional"}),
+        );
+        let id = assignment["structuredContent"]["previewId"]
+            .as_str()
+            .unwrap();
+        assert_eq!(
+            rpc.call(3, "apply_profile", json!({"previewId":id}))["isError"],
+            false
+        );
+        let preview = rpc.call(4, "preview_push", json!({"repositoryId":"repo-1"}));
+        assert_eq!(preview["isError"], false, "{preview}");
+        assert_eq!(
+            preview["structuredContent"].get("previewId").is_some(),
+            tier == "remote"
+        );
+    }
+}
+
+#[test]
+fn clone_preview_validates_home_and_destination_without_network() {
+    let fixture = Fixture::new();
+    let (_, data_dir) = push_fixture(&fixture);
+    let mut rpc = Rpc::start_tier(&data_dir, "remote");
+    initialize(&mut rpc);
+    let preview = rpc.call(2, "preview_clone", json!({"profileId":"fictional","sshUrl":" git@github.com:fictional/new-repo.git ","destinationParent":fixture.root}));
+    assert_eq!(preview["isError"], false, "{preview}");
+    assert_eq!(
+        preview["structuredContent"]["sshUrl"],
+        "git@github.com:fictional/new-repo.git"
+    );
+    assert!(preview["structuredContent"]["previewId"].as_str().is_some());
+    fs::create_dir(fixture.root.join("new-repo")).unwrap();
+    let rejected = rpc.call(
+        3,
+        "clone_repository",
+        json!({"previewId":preview["structuredContent"]["previewId"]}),
+    );
+    assert_eq!(rejected["isError"], true);
+    assert!(rejected["content"][0]["text"]
+        .as_str()
+        .unwrap()
+        .contains("repository changed"));
+}
+
+#[test]
+fn remote_without_elicitation_is_rejected_and_audited() {
+    let fixture = Fixture::new();
+    let (_, data_dir) = push_fixture(&fixture);
+    let mut rpc = Rpc::start_tier(&data_dir, "remote");
+    initialize(&mut rpc);
+    let id = applied_push_preview(&mut rpc);
+    let result = rpc.call(5, "push", json!({"previewId":id}));
+    assert_eq!(result["isError"], true);
+    assert!(result["content"][0]["text"]
+        .as_str()
+        .unwrap()
+        .contains("cannot show GitContext's confirmation prompt"));
+    let audit = fs::read_to_string(data_dir.join("mcp-audit.jsonl")).unwrap();
+    let last: Value = serde_json::from_str(audit.lines().last().unwrap()).unwrap();
+    assert_eq!(last["tool"], "push");
+    assert_eq!(last["outcome"], "rejected");
+    assert!(last["confirmation"].is_null());
+}
+
+#[test]
+fn elicitation_decline_cancel_accept_and_timeout() {
+    for (action, content, expected) in [
+        ("decline", json!(null), "declined"),
+        ("cancel", json!(null), "cancelled"),
+        ("accept", json!({"approved":false}), "declined"),
+        ("accept", json!({"approved":true}), "Test stopped before"),
+    ] {
+        let fixture = Fixture::new();
+        let (_, data_dir) = push_fixture(&fixture);
+        let mut rpc = Rpc::start_tier(&data_dir, "remote");
+        initialize_with_capabilities(&mut rpc, json!({"elicitation":{"form":{}}}));
+        let id = applied_push_preview(&mut rpc);
+        rpc.send(json!({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"push","arguments":{"previewId":id}}}));
+        let request = rpc.read_message();
+        assert_eq!(request["method"], "elicitation/create", "{request}");
+        assert!(request["params"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("Profile: Fictional"));
+        assert_eq!(
+            request["params"]["requestedSchema"]["properties"]["approved"]["type"],
+            "boolean"
+        );
+        rpc.send(json!({"jsonrpc":"2.0","id":request["id"],"result":{"action":action,"content":content}}));
+        let response = rpc.read_message();
+        assert_eq!(response["id"], 5, "{response}");
+        assert!(
+            response["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains(expected),
+            "{response}"
+        );
+        let audit = fs::read_to_string(data_dir.join("mcp-audit.jsonl")).unwrap();
+        let last: Value = serde_json::from_str(audit.lines().last().unwrap()).unwrap();
+        assert_eq!(last["confirmation"], "elicitation");
+    }
+    let fixture = Fixture::new();
+    let (_, data_dir) = push_fixture(&fixture);
+    let mut rpc = Rpc::start_with(&data_dir, "remote", false, Some(30));
+    initialize_with_capabilities(&mut rpc, json!({"elicitation":{"form":{}}}));
+    let id = applied_push_preview(&mut rpc);
+    rpc.send(json!({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"push","arguments":{"previewId":id}}}));
+    let request = rpc.read_message();
+    assert_eq!(request["method"], "elicitation/create");
+    let mut response = rpc.read_message();
+    while response["id"] != 5 {
+        response = rpc.read_message();
+    }
+    assert!(
+        response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("timed out"),
+        "{response}"
+    );
+}
+
+#[test]
+fn trusted_client_does_not_receive_elicitation() {
+    let fixture = Fixture::new();
+    let (_, data_dir) = push_fixture(&fixture);
+    let mut rpc = Rpc::start_with(&data_dir, "remote", true, None);
+    initialize_with_capabilities(&mut rpc, json!({"elicitation":{"form":{}}}));
+    let id = applied_push_preview(&mut rpc);
+    let response = rpc.call(5, "push", json!({"previewId":id}));
+    assert_eq!(response["isError"], true);
+    assert!(response["content"][0]["text"]
+        .as_str()
+        .unwrap()
+        .contains("Test stopped before"));
+    let audit = fs::read_to_string(data_dir.join("mcp-audit.jsonl")).unwrap();
+    let last: Value = serde_json::from_str(audit.lines().last().unwrap()).unwrap();
+    assert_eq!(last["confirmation"], "client");
+}
+
+#[test]
+fn acceptance_rechecks_the_fingerprint() {
+    let fixture = Fixture::new();
+    let (repo, data_dir) = push_fixture(&fixture);
+    let mut rpc = Rpc::start_tier(&data_dir, "remote");
+    initialize_with_capabilities(&mut rpc, json!({"elicitation":{"form":{}}}));
+    let id = applied_push_preview(&mut rpc);
+    rpc.send(json!({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"push","arguments":{"previewId":id}}}));
+    let request = rpc.read_message();
+    assert_eq!(request["method"], "elicitation/create");
+    fs::write(repo.join("changed-after-preview.txt"), "change").unwrap();
+    rpc.send(json!({"jsonrpc":"2.0","id":request["id"],"result":{"action":"accept","content":{"approved":true}}}));
+    let response = rpc.read_message();
+    assert_eq!(response["id"], 5);
+    assert!(
+        response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("repository changed"),
+        "{response}"
+    );
+    let audit = fs::read_to_string(data_dir.join("mcp-audit.jsonl")).unwrap();
+    let last: Value = serde_json::from_str(audit.lines().last().unwrap()).unwrap();
+    assert_eq!(last["outcome"], "rejected");
+    assert_eq!(last["confirmation"], "elicitation");
 }
 
 #[test]
