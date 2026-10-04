@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import {
   addRepository,
   applyAssignment,
@@ -39,6 +39,7 @@ import { resolveLocale } from "./locale";
 import { Shell, type ShellPage } from "./ui/Shell";
 import { RepositoryList } from "./ui/RepositoryList";
 import { RepositoryDetail } from "./ui/RepositoryDetail";
+import { shouldRefreshOnFocus } from "./ui/status";
 import { ProfileDot } from "./ui/ProfileDot";
 import "./App.css";
 import "./ui/ui.css";
@@ -540,6 +541,7 @@ function App({ previewLocale }: { previewLocale?: Locale }) {
   const [errorNotice, setErrorNotice] = useState<string | null>(null);
   const [environmentDismissed, setEnvironmentDismissed] = useState(false);
   const [statuses, setStatuses] = useState<Record<string, RepositoryStatus>>({});
+  const statusRefresh = useRef({ at: 0, running: false });
   const [page, setPage] = useState<ShellPage>("repositories");
   const [selectedRepositoryId, setSelectedRepositoryId] = useState<string | null>(null);
   const [pendingProfileId, setPendingProfileId] = useState("");
@@ -585,14 +587,32 @@ function App({ previewLocale }: { previewLocale?: Locale }) {
   const pendingProfile = data?.profiles.find((profile) => profile.id === pendingProfileId) ?? null;
 
   const refreshStatuses = () => {
+    statusRefresh.current = { at: Date.now(), running: true };
     inspectRepositoryStatuses()
       .then((items) => setStatuses(Object.fromEntries(items.map((item) => [item.repositoryId, item]))))
-      .catch((error) => setErrorNotice(`${messageFrom(error, locale)} ${shellCopy[locale].refresh}`));
+      .catch((error) => setErrorNotice(`${messageFrom(error, locale)} ${shellCopy[locale].refresh}`))
+      .finally(() => { statusRefresh.current.running = false; });
   };
 
   useEffect(() => {
     if (data) refreshStatuses();
   }, [data]);
+
+  // Commits or pushes made outside GitContext show up when the user comes back to the window.
+  useEffect(() => {
+    if (!data) return;
+    const onReturn = () => {
+      if (document.visibilityState !== "visible") return;
+      const { at, running } = statusRefresh.current;
+      if (shouldRefreshOnFocus(at, Date.now(), running)) refreshStatuses();
+    };
+    window.addEventListener("focus", onReturn);
+    document.addEventListener("visibilitychange", onReturn);
+    return () => {
+      window.removeEventListener("focus", onReturn);
+      document.removeEventListener("visibilitychange", onReturn);
+    };
+  }, [data, locale]);
 
   const updateData = (nextData: AppData) => setResult((current) => current ? { ...current, data: nextData } : current);
 

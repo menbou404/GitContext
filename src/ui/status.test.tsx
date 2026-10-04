@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { shellCopy } from "../i18n";
 import type { Profile, RepositoryRecord, RepositoryStatus, RepositoryState } from "../types";
 import { StatusLabel } from "./StatusLabel";
-import { filterRepositories } from "./status";
+import { FOCUS_REFRESH_INTERVAL_MS, filterRepositories, shouldRefreshOnFocus } from "./status";
 
 const profile: Profile = {
   id: "p", label: "Sample", accent: "#D8A33F", gitName: "Example", gitEmail: "person@example.com", autoApprove: { cloneRepository: false },
@@ -41,5 +41,13 @@ describe("repository list status", () => {
       expect(shellCopy.ja[state].length).toBeGreaterThan(0);
       expect(shellCopy.en[state].length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("refresh on focus", () => {
+  it("waits for the interval and skips while a refresh is running", () => {
+    expect(shouldRefreshOnFocus(0, FOCUS_REFRESH_INTERVAL_MS, false)).toBe(true);
+    expect(shouldRefreshOnFocus(0, FOCUS_REFRESH_INTERVAL_MS - 1, false)).toBe(false);
+    expect(shouldRefreshOnFocus(0, FOCUS_REFRESH_INTERVAL_MS, true)).toBe(false);
   });
 });

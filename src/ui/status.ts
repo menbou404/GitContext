@@ -19,3 +19,11 @@ export function filterRepositories(
       .some((value) => value.toLocaleLowerCase().includes(term));
   });
 }
+
+// Coming back to the window refreshes statuses, but not more often than this,
+// because each refresh runs git and the GitHub CLI for every repository.
+export const FOCUS_REFRESH_INTERVAL_MS = 15_000;
+
+export function shouldRefreshOnFocus(lastRefreshAt: number, now: number, refreshing: boolean): boolean {
+  return !refreshing && now - lastRefreshAt >= FOCUS_REFRESH_INTERVAL_MS;
+}
