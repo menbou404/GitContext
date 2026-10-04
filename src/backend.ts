@@ -33,7 +33,9 @@ import type {
   RepositoryStatus,
 } from "./types";
 
-let demoState: AppData = structuredClone(demoBootstrap.data);
+let demoState: AppData = typeof window !== "undefined" && !isTauri() && new URLSearchParams(window.location.search).get("demo") === "empty"
+  ? { ...structuredClone(demoBootstrap.data), profiles: [], repositories: [] }
+  : structuredClone(demoBootstrap.data);
 const demoMergedPullRequests = new Set<number>();
 const demoReapplied = new Set<string>();
 const demoChanges = new Map<string, CommitPreview["changes"]>([["repo-personal", [
@@ -266,10 +268,11 @@ export async function inspectGithubProfile(
   ghConfigDir?: string | null,
 ): Promise<GhProfileStatus> {
   if (!inDesktopApp()) {
+    const profile = demoState.profiles.find((item) => item.id === profileId);
     return {
       available: true,
       authenticated: Boolean(ghConfigDir),
-      username: ghConfigDir ? "connected-account" : null,
+      username: ghConfigDir ? profile?.githubUsername || "connected-account" : null,
       detail: ghConfigDir ? null : "This Profile has not been connected to GitHub yet.",
       configDir: ghConfigDir || `C:\\Users\\you\\AppData\\Roaming\\app.gitcontext.desktop\\gh\\${profileId}`,
     };

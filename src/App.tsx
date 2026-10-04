@@ -4,16 +4,11 @@ import {
   applyAssignment,
   bootstrap,
   chooseCloneDestinationDirectory,
-  chooseGhConfigDirectory,
   chooseRepositoryDirectory,
-  chooseSshKey,
   cloneGithubRepository,
-  connectGithubProfile,
-  inspectGithubProfile,
   inspectRepositoryStatuses,
-  listenForGithubAuthPrompt,
+  inspectGithubProfile,
   listGithubRepositories,
-  openGithubAuthPage,
   previewAssignment,
   removeRepository,
   saveProfile,
@@ -24,14 +19,10 @@ import {
 import {
   AlertIcon,
   BranchIcon,
-  CheckIcon,
   CloseIcon,
-  PlusIcon,
   SearchIcon,
-  ShieldIcon,
-  TerminalIcon,
 } from "./Icons";
-import type { AppData, ApplyPreview, AutoApprove, BootstrapResult, CloneOptions, GhProfileStatus, GithubAuthPrompt, GithubRepository, Profile } from "./types";
+import type { AppData, ApplyPreview, AutoApprove, BootstrapResult, CloneOptions, GhProfileStatus, GithubRepository, Profile } from "./types";
 import type { RepositoryStatus } from "./types";
 import { initials, profileIsComplete } from "./types";
 import { localizeRuntimeMessage, shellCopy, uiCopy, type Locale } from "./i18n";
@@ -40,7 +31,10 @@ import { Shell, type ShellPage } from "./ui/Shell";
 import { RepositoryList } from "./ui/RepositoryList";
 import { RepositoryDetail } from "./ui/RepositoryDetail";
 import { shouldRefreshOnFocus } from "./ui/status";
-import { ProfileDot } from "./ui/ProfileDot";
+import { ProfileEditor } from "./ui/ProfileEditor";
+import { ProfileList } from "./ui/ProfileList";
+import { FirstRunGuide } from "./ui/FirstRunGuide";
+import { repositoryProfileStatus } from "./ui/profileStatus";
 import "./App.css";
 import "./ui/ui.css";
 
@@ -81,277 +75,6 @@ function ProfileAvatar({ profile, size = "normal" }: { profile: Profile; size?: 
     >
       {initials(profile.label)}
     </span>
-  );
-}
-
-function ProfileEditor({
-  initial,
-  creating,
-  ghAvailable,
-  locale,
-  onClose,
-  onSave,
-  onAutoApprove,
-  inline = false,
-}: {
-  initial: Profile;
-  creating: boolean;
-  ghAvailable: boolean;
-  locale: Locale;
-  onClose: () => void;
-  onSave: (profile: Profile) => Promise<void>;
-  onAutoApprove: (profileId: string, enabled: boolean) => Promise<void>;
-  inline?: boolean;
-}) {
-  const copy = uiCopy[locale];
-  const [draft, setDraft] = useState(initial);
-  const [saving, setSaving] = useState(false);
-  const [autoApproveSaving, setAutoApproveSaving] = useState(false);
-  const [linking, setLinking] = useState(false);
-  const [checking, setChecking] = useState(false);
-  const [ghStatus, setGhStatus] = useState<GhProfileStatus | null>(null);
-  const [authPrompt, setAuthPrompt] = useState<GithubAuthPrompt | null>(null);
-  const [codeCopied, setCodeCopied] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let active = true;
-    let unlisten: (() => void) | undefined;
-    listenForGithubAuthPrompt((prompt) => {
-      if (!active || prompt.profileId !== initial.id) return;
-      setAuthPrompt(prompt);
-      setCodeCopied(true);
-    })
-      .then((cleanup) => {
-        if (active) unlisten = cleanup;
-        else cleanup();
-      })
-      .catch((cause) => {
-        if (active) setError(messageFrom(cause, locale));
-      });
-    return () => {
-      active = false;
-      unlisten?.();
-    };
-  }, [initial.id, locale]);
-
-  useEffect(() => {
-    if (!initial.ghConfigDir) return;
-    let active = true;
-    setChecking(true);
-    inspectGithubProfile(initial.id, initial.ghConfigDir)
-      .then((status) => {
-        if (active) setGhStatus(status);
-      })
-      .catch(() => undefined)
-      .finally(() => {
-        if (active) setChecking(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [initial.ghConfigDir, initial.id]);
-
-  const update = (key: keyof Profile, value: string) => {
-    if (key === "ghConfigDir") setGhStatus(null);
-    setDraft((current) => ({ ...current, [key]: value }));
-  };
-
-  const applyGhStatus = (status: GhProfileStatus) => {
-    setGhStatus(status);
-    setDraft((current) => ({
-      ...current,
-      ghConfigDir: status.configDir ?? current.ghConfigDir,
-      githubUsername: status.username ?? current.githubUsername,
-    }));
-  };
-
-  const connectGithub = async () => {
-    setError(null);
-    setAuthPrompt(null);
-    setCodeCopied(false);
-    setLinking(true);
-    try {
-      applyGhStatus(await connectGithubProfile(draft.id, draft.ghConfigDir));
-      setAuthPrompt(null);
-    } catch (cause) {
-      setAuthPrompt(null);
-      setError(messageFrom(cause, locale));
-    } finally {
-      setLinking(false);
-    }
-  };
-
-  const copyAuthCode = async () => {
-    if (!authPrompt) return;
-    try {
-      await navigator.clipboard.writeText(authPrompt.code);
-      setCodeCopied(true);
-    } catch {
-      setError(copy.couldNotCopyCode);
-    }
-  };
-
-  const reopenGithubAuth = async () => {
-    try {
-      await openGithubAuthPage();
-    } catch (cause) {
-      setError(messageFrom(cause, locale));
-    }
-  };
-
-  const checkGithub = async () => {
-    setError(null);
-    setChecking(true);
-    try {
-      applyGhStatus(await inspectGithubProfile(draft.id, draft.ghConfigDir));
-    } catch (cause) {
-      setError(messageFrom(cause, locale));
-    } finally {
-      setChecking(false);
-    }
-  };
-
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
-    setError(null);
-    setSaving(true);
-    try {
-      await onSave(draft);
-      onClose();
-    } catch (cause) {
-      setError(messageFrom(cause, locale));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const updateCloneApproval = async (enabled: boolean) => {
-    setError(null);
-    setAutoApproveSaving(true);
-    try {
-      await onAutoApprove(draft.id, enabled);
-      setDraft((current) => ({ ...current, autoApprove: { cloneRepository: enabled } }));
-    } catch (cause) {
-      setError(messageFrom(cause, locale));
-    } finally {
-      setAutoApproveSaving(false);
-    }
-  };
-
-  return (
-    <div className={inline ? "ui-inline-editor" : "modal-layer"} role={inline ? undefined : "presentation"} onMouseDown={inline ? undefined : onClose}>
-      <form className={`modal profile-modal ${inline ? "ui-inline-profile-modal" : ""}`} onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}>
-        <div className="modal-header">
-          <div>
-            <p className="eyebrow">{copy.repositoryIdentity}</p>
-            <h2>{creating ? copy.createProfile : copy.editProfile}</h2>
-            <p className="modal-lead profile-modal-lead">{copy.createProfileLead}</p>
-          </div>
-          <button className="icon-button" type="button" onClick={onClose} aria-label={copy.close}>
-            <CloseIcon />
-          </button>
-        </div>
-
-        <section className="profile-setup-section">
-          <div className="setup-section-head"><span>1</span><div><h3>{copy.identitySection}</h3><p>{copy.identitySectionLead}</p></div></div>
-          <div className="profile-form-grid">
-            <label className="field field--wide">
-              <span>{copy.profileName}</span>
-              <input required value={draft.label} onChange={(event) => update("label", event.currentTarget.value)} placeholder={copy.profileNamePlaceholder} />
-            </label>
-            <fieldset className="accent-field field--wide">
-              <legend>{copy.color}</legend>
-              <div className="accent-options">
-                {accents.map((accent) => (
-                  <button key={accent} type="button" className={draft.accent === accent ? "selected" : ""} style={{ background: accent }} onClick={() => update("accent", accent)} aria-label={copy.useColor(accent)}>
-                    {draft.accent === accent && <CheckIcon />}
-                  </button>
-                ))}
-              </div>
-            </fieldset>
-            <label className="field">
-              <span>{copy.gitAuthorName}</span>
-              <input required value={draft.gitName} onChange={(event) => update("gitName", event.currentTarget.value)} placeholder={copy.gitAuthorNamePlaceholder} />
-            </label>
-            <label className="field">
-              <span>{copy.gitAuthorEmail}</span>
-              <input required type="email" value={draft.gitEmail} onChange={(event) => update("gitEmail", event.currentTarget.value)} placeholder="you@example.com" />
-            </label>
-          </div>
-        </section>
-
-        <section className="profile-setup-section">
-          <div className="setup-section-head"><span>2</span><div><h3>{copy.githubConnection}</h3><p>{copy.githubConnectionLead}</p></div></div>
-          <div className={`connection-card ${ghStatus?.authenticated ? "is-connected" : ""}`}>
-            <span className="connection-icon"><TerminalIcon /></span>
-            <div>
-              <strong>{ghStatus?.authenticated && ghStatus.username ? copy.connectedAs(ghStatus.username) : copy.githubNotConnectedDetail}</strong>
-              <small>{linking ? copy.waitingForGithub : !ghAvailable ? copy.ghCliMissing : ghStatus?.detail ? localizeRuntimeMessage(ghStatus.detail, locale) : copy.githubConnectionLead}</small>
-            </div>
-            {ghAvailable && (
-              <div className="connection-actions">
-                {draft.ghConfigDir && <button className="button button--ghost" type="button" onClick={checkGithub} disabled={checking || linking}>{checking ? copy.checkingConnection : copy.checkConnection}</button>}
-                <button className="button button--primary" type="button" onClick={connectGithub} disabled={linking || checking}>{linking ? copy.waitingForGithub : ghStatus?.authenticated ? copy.reconnectGithub : copy.connectGithub}</button>
-              </div>
-            )}
-          </div>
-          {authPrompt && (
-            <div className="github-device-card" role="status" aria-live="polite">
-              <div className="github-device-copy">
-                <span>{copy.githubOneTimeCode}</span>
-                <code>{authPrompt.code}</code>
-              </div>
-              <p>{copy.githubDeviceInstructions}</p>
-              <div className="github-device-actions">
-                <button className="button button--ghost" type="button" onClick={copyAuthCode}>{codeCopied ? copy.codeCopied : copy.copyCode}</button>
-                <button className="button button--primary" type="button" onClick={reopenGithubAuth}>{copy.openGithubAuthPage}</button>
-              </div>
-            </div>
-          )}
-          {!ghAvailable && <code className="install-command">{copy.ghInstallCommand}</code>}
-          <div className="profile-form-grid compact-grid">
-            <label className="field">
-              <span>{copy.githubUsername} <small>{copy.optional}</small></span>
-              <div className="input-prefix"><span>@</span><input value={draft.githubUsername ?? ""} onChange={(event) => update("githubUsername", event.currentTarget.value)} placeholder={copy.usernamePlaceholder} /></div>
-            </label>
-            <label className="field">
-              <span>{copy.existingGhDirectory} <small>{copy.optional}</small></span>
-              <div className="path-input">
-                <input value={draft.ghConfigDir ?? ""} onChange={(event) => update("ghConfigDir", event.currentTarget.value)} placeholder="C:\\Users\\you\\.config\\gh-profile" />
-                <button type="button" onClick={async () => { const path = await chooseGhConfigDirectory(copy.selectGhDirectoryDialog); if (path) update("ghConfigDir", path); }}>{copy.browse}</button>
-              </div>
-            </label>
-          </div>
-        </section>
-
-        <section className="profile-setup-section">
-          <div className="setup-section-head"><span>3</span><div><h3>{copy.sshConnection}</h3><p>{copy.sshConnectionLead}</p></div></div>
-          <label className="field">
-            <span>{copy.existingSshKey} <small>{copy.referenceOnly}</small></span>
-            <div className="path-input">
-              <input value={draft.sshKeyPath ?? ""} onChange={(event) => update("sshKeyPath", event.currentTarget.value)} placeholder="C:\\Users\\you\\.ssh\\id_ed25519_profile" />
-              <button type="button" onClick={async () => { const path = await chooseSshKey(copy.selectSshKeyDialog); if (path) update("sshKeyPath", path); }}>{copy.browse}</button>
-            </div>
-          </label>
-        </section>
-
-        {!creating && <fieldset className="auto-approve-settings" disabled={autoApproveSaving}>
-          <legend>{copy.autoApproveTitle}</legend>
-          <label><input type="checkbox" checked={draft.autoApprove.cloneRepository} onChange={(event) => updateCloneApproval(event.currentTarget.checked)} />{copy.autoApproveClone}</label>
-        </fieldset>}
-
-        <div className="privacy-note">
-          <ShieldIcon />
-          <span>{copy.privacyNote}</span>
-        </div>
-        {error && <div className="inline-error"><AlertIcon />{error}</div>}
-        <div className="modal-actions">
-          <button className="button button--ghost" type="button" onClick={onClose}>{copy.cancel}</button>
-          <button className="button button--primary" disabled={saving} type="submit">{saving ? copy.saving : copy.saveProfile}</button>
-        </div>
-      </form>
-    </div>
   );
 }
 
@@ -541,6 +264,9 @@ function App({ previewLocale }: { previewLocale?: Locale }) {
   const [errorNotice, setErrorNotice] = useState<string | null>(null);
   const [environmentDismissed, setEnvironmentDismissed] = useState(false);
   const [statuses, setStatuses] = useState<Record<string, RepositoryStatus>>({});
+  const [profileStatuses, setProfileStatuses] = useState<Record<string, GhProfileStatus>>({});
+  const [profileRefreshing, setProfileRefreshing] = useState(false);
+  const checkedProfiles = useRef(new Set<string>());
   const statusRefresh = useRef({ at: 0, running: false });
   const [statusRefreshing, setStatusRefreshing] = useState(false);
   const [statusesRefreshedAt, setStatusesRefreshedAt] = useState<Date | null>(null);
@@ -587,6 +313,33 @@ function App({ previewLocale }: { previewLocale?: Locale }) {
   const environment = result?.environment;
   const selectedRepository = data?.repositories.find((repo) => repo.id === selectedRepositoryId) ?? null;
   const pendingProfile = data?.profiles.find((profile) => profile.id === pendingProfileId) ?? null;
+
+  const refreshProfileStatuses = (force = false) => {
+    if (!data) return;
+    const profiles = data.profiles.filter((profile) => force || (!checkedProfiles.current.has(profile.id) && !repositoryProfileStatus(profile.id, statuses, data.repositories)));
+    if (!profiles.length) return;
+    profiles.forEach((profile) => checkedProfiles.current.add(profile.id));
+    setProfileRefreshing(true);
+    void Promise.all(profiles.map(async (profile) => {
+      try {
+        const status = await inspectGithubProfile(profile.id, profile.ghConfigDir);
+        setProfileStatuses((current) => ({ ...current, [profile.id]: status }));
+      } catch {
+        setProfileStatuses((current) => ({ ...current, [profile.id]: { available: false, authenticated: false } }));
+      }
+    })).finally(() => setProfileRefreshing(false));
+  };
+
+  useEffect(() => {
+    if (page === "profiles" || (data && data.repositories.length === 0)) refreshProfileStatuses();
+    // Each profile is checked once while this page is open; a manual refresh can check again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, data, statuses]);
+
+  const currentProfileStatuses = data ? Object.fromEntries(data.profiles.flatMap((profile) => {
+    const status = profileStatuses[profile.id] ?? repositoryProfileStatus(profile.id, statuses, data.repositories);
+    return status ? [[profile.id, status]] : [];
+  })) as Record<string, GhProfileStatus> : {};
 
   const refreshStatuses = () => {
     if (statusRefresh.current.running) return;
@@ -639,15 +392,17 @@ function App({ previewLocale }: { previewLocale?: Locale }) {
     setErrorNotice(null);
     try {
       const path = await chooseRepositoryDirectory(copy.selectRepositoryDialog);
-      if (!path) return;
+      if (!path) return false;
       setBusy(true);
       const repository = await addRepository(path);
       if (data) updateData({ ...data, repositories: [...data.repositories.filter((repo) => repo.id !== repository.id), repository] });
       setSelectedRepositoryId(repository.id);
       setPendingProfileId(data?.profiles[0]?.id ?? "");
       setNotice(copy.repositoryAdded(repository.name));
+      return true;
     } catch (error) {
       setErrorNotice(messageFrom(error, locale));
+      return false;
     } finally {
       setBusy(false);
     }
@@ -656,6 +411,13 @@ function App({ previewLocale }: { previewLocale?: Locale }) {
   const saveProfileAction = async (profile: Profile) => {
     const nextData = await saveProfile(profile);
     updateData(nextData);
+    checkedProfiles.current.add(profile.id);
+    setProfileStatuses((current) => ({ ...current, [profile.id]: { available: true, authenticated: false } }));
+    if (profile.ghConfigDir) {
+      void inspectGithubProfile(profile.id, profile.ghConfigDir)
+        .then((status) => setProfileStatuses((current) => ({ ...current, [profile.id]: status })))
+        .catch(() => undefined);
+    }
     setNotice(copy.profileSaved(profile.label));
   };
 
@@ -741,24 +503,23 @@ function App({ previewLocale }: { previewLocale?: Locale }) {
   const selectedStatus = selectedRepository ? statuses[selectedRepository.id] : undefined;
   const missingTools = [!environment.git.available && "git", !environment.gh.available && "gh", !environment.ssh.available && "SSH"].filter(Boolean).join(" / ");
   const visibleNotice = errorNotice || (missingTools && !environmentDismissed ? shellCopy[locale].envMissing(missingTools) : null);
+  const openProfileEditor = (profile: Profile) => setEditingProfile({ profile, creating: false });
+  const createProfile = () => setEditingProfile({ profile: emptyProfile(), creating: true });
+  const profileList = <ProfileList profiles={data.profiles} repositories={data.repositories} statuses={currentProfileStatuses} locale={locale} refreshing={profileRefreshing} onRefresh={() => refreshProfileStatuses(true)} onCreate={createProfile} onOpen={openProfileEditor} />;
+  const firstRunGuide = <FirstRunGuide profiles={data.profiles} repositories={data.repositories} statuses={currentProfileStatuses} locale={locale}
+    onCreate={() => { setPage("profiles"); createProfile(); }}
+    onConnect={() => { setPage("profiles"); const profile = data.profiles.find((item) => item.ghConfigDir) ?? data.profiles[0]; if (profile) openProfileEditor(profile); }}
+    onAdd={() => { void addRepo().then((added) => { if (added) setPage("repositories"); }); }} />;
 
   return (
-    <Shell page={page} locale={locale} repositoryCount={data.repositories.length} notice={visibleNotice} noticeLink={!errorNotice && (!environment.gh.available || !environment.ssh.available) ? "profiles" : null} onDismiss={() => { if (errorNotice) setErrorNotice(null); else setEnvironmentDismissed(true); }} onNavigate={(nextPage) => { setPage(nextPage); setSelectedRepositoryId(null); setEditingProfile(null); setPreview(null); setNotice(null); }} onLocaleChange={changeLocale}>
+    <Shell page={page} locale={locale} repositoryCount={data.repositories.length} notice={visibleNotice} noticeLink={!errorNotice && (!environment.gh.available || !environment.ssh.available) ? "profiles" : null} onDismiss={() => { if (errorNotice) setErrorNotice(null); else setEnvironmentDismissed(true); }} onNavigate={(nextPage) => { if (nextPage === "profiles" && page !== "profiles") checkedProfiles.current.clear(); setPage(nextPage); setSelectedRepositoryId(null); setEditingProfile(null); setPreview(null); setNotice(null); }} onLocaleChange={changeLocale}>
       {notice && <p className="ui-result" role="status">{notice}</p>}
-      {page === "profiles" ? <div className="ui-page">
-        <div className="ui-page-heading"><h1>{shellCopy[locale].profiles}</h1><div className="ui-heading-spacer" /><button className="ui-button ui-button--primary" type="button" onClick={() => setEditingProfile({ profile: emptyProfile(), creating: true })}><PlusIcon />{shellCopy[locale].addProfile}</button></div>
-        {!editingProfile && <div className="ui-profile-list">{data.profiles.map((profile) => <article className="ui-card" key={profile.id}>
-          <div className="ui-profile"><ProfileDot profile={profile} /><strong>{profile.label}</strong><small>{profile.githubUsername ? `@${profile.githubUsername}` : copy.githubNotLinked}</small></div>
-          <span className="ui-muted">{!profileIsComplete(profile) ? copy.needsSetup : data.repositories.some((repo) => repo.profileId === profile.id && statuses[repo.id]?.github?.authenticated && statuses[repo.id]?.github?.username?.toLowerCase() === profile.githubUsername?.toLowerCase()) ? copy.githubLinked : profile.githubUsername ? shellCopy[locale].notConnected : copy.gitOnly}</span>
-          <span className="ui-muted">{shellCopy[locale].assignedCount(data.repositories.filter((repo) => repo.profileId === profile.id).length)}</span>
-          <button className="ui-button" type="button" onClick={() => setEditingProfile({ profile, creating: false })}>{shellCopy[locale].editProfile}</button>
-        </article>)}</div>}
-        {!data.profiles.length && !editingProfile && <p>{shellCopy[locale].noProfiles}</p>}
-        {editingProfile && <ProfileEditor initial={editingProfile.profile} creating={editingProfile.creating} ghAvailable={environment.gh.available} locale={locale} onClose={() => setEditingProfile(null)} onSave={saveProfileAction} onAutoApprove={updateProfileAutoApprove} inline />}
-      </div> : selectedRepository ? <RepositoryDetail key={selectedRepository.id} repository={selectedRepository} profiles={data.profiles} status={selectedStatus} pendingProfileId={pendingProfileId} preview={preview} locale={locale} busy={busy} removing={removeConfirmingId === selectedRepository.id}
+      {page === "profiles" ? editingProfile ? <ProfileEditor key={editingProfile.profile.id} initial={editingProfile.profile} creating={editingProfile.creating} ghAvailable={environment.gh.available} locale={locale} initialStatus={currentProfileStatuses[editingProfile.profile.id]} onStatus={(id, status) => setProfileStatuses((current) => ({ ...current, [id]: status }))} onClose={() => setEditingProfile(null)} onSave={saveProfileAction} onAutoApprove={updateProfileAutoApprove} /> : data.repositories.length === 0 ? <div className="ui-page">{firstRunGuide}{data.profiles.length > 0 && profileList}</div> : profileList
+        : selectedRepository ? <RepositoryDetail key={selectedRepository.id} repository={selectedRepository} profiles={data.profiles} status={selectedStatus} pendingProfileId={pendingProfileId} preview={preview} locale={locale} busy={busy} removing={removeConfirmingId === selectedRepository.id}
         onBack={() => { setSelectedRepositoryId(null); setPreview(null); setNotice(null); }} onPendingProfile={setPendingProfileId} onReview={reviewAssignment} onCancelReview={() => setPreview(null)} onApply={applyProfileAction} onAutoApprove={updateAutoApprove}
         onStartRemove={() => setRemoveConfirmingId(selectedRepository.id)} onCancelRemove={() => setRemoveConfirmingId(null)} onRemove={removeSelected}
         onData={updateData} onFinished={refreshStatuses} />
+        : data.repositories.length === 0 ? firstRunGuide
         : <RepositoryList repositories={data.repositories} profiles={data.profiles} statuses={statuses} locale={locale} busy={busy} refreshing={statusRefreshing} refreshedAt={statusesRefreshedAt} onOpen={selectRepository} onAdd={addRepo} onClone={() => setCloneOpen(true)} onRefresh={refreshStatuses} />}
 
       {cloneOpen && <CloneDialog profiles={data.profiles} locale={locale} onClose={() => setCloneOpen(false)} onClone={cloneRepositoryAction} />}
