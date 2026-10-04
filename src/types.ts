@@ -79,6 +79,12 @@ export interface BootstrapResult {
   developmentData?: boolean;
 }
 
+export interface BackupEntry {
+  fileName: string;
+  createdAt: string;
+  sizeBytes: number;
+}
+
 export interface GhProfileStatus {
   available: boolean;
   authenticated: boolean;

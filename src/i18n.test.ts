@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { localizeRuntimeMessage, profileCopy, shellCopy, tabCopy, uiCopy } from "./i18n";
+import { localizeRuntimeMessage, profileCopy, settingsCopy, shellCopy, tabCopy, uiCopy } from "./i18n";
 
 describe("i18n keys", () => {
   it("has matching keys in Japanese and English", () => {
-    for (const copy of [shellCopy, uiCopy, tabCopy, profileCopy]) {
+    for (const copy of [shellCopy, uiCopy, tabCopy, profileCopy, settingsCopy]) {
       expect(Object.keys(copy.ja).sort()).toEqual(Object.keys(copy.en).sort());
     }
   });

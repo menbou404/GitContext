@@ -4,6 +4,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { demoBootstrap } from "./demoData";
 import type {
   AppData,
+  BackupEntry,
   AppSettings,
   AutoApprove,
   ApplyPreview,
@@ -75,6 +76,29 @@ export async function setLocale(locale: "ja" | "en"): Promise<AppSettings> {
     return demoState.settings;
   }
   return invoke<AppSettings>("set_locale", { locale });
+}
+
+export async function refreshEnvironment(): Promise<BootstrapResult["environment"]> {
+  if (!inDesktopApp()) return structuredClone(demoBootstrap.environment);
+  return invoke<BootstrapResult["environment"]>("refresh_environment");
+}
+
+export async function listBackups(): Promise<BackupEntry[]> {
+  if (!inDesktopApp()) return [
+    { fileName: "state-20260826T091500.000Z.json", createdAt: "2026-08-26T09:15:00Z", sizeBytes: 4096 },
+    { fileName: "state-20260825T143000.000Z.json", createdAt: "2026-08-25T14:30:00Z", sizeBytes: 3584 },
+  ];
+  return invoke<BackupEntry[]>("list_backups");
+}
+
+export async function restoreBackup(fileName: string): Promise<AppData> {
+  if (!inDesktopApp()) return structuredClone(demoState);
+  return invoke<AppData>("restore_backup", { fileName });
+}
+
+export async function openDataFolder(): Promise<void> {
+  if (!inDesktopApp()) return;
+  return invoke<void>("open_data_folder");
 }
 
 export async function inspectRepositoryStatuses(): Promise<RepositoryStatus[]> {

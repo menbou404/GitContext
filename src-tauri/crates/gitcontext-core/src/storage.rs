@@ -7,12 +7,21 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::models::AppData;
+use crate::models::{migrate_app_data, AppData};
 use chrono::Utc;
+use serde::Serialize;
 
 const RELEASE_IDENTIFIER: &str = "app.gitcontext.desktop";
 const DEVELOPMENT_IDENTIFIER: &str = "app.gitcontext.dev";
 const BACKUP_LIMIT: usize = 20;
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupEntry {
+    pub file_name: String,
+    pub created_at: String,
+    pub size_bytes: u64,
+}
 
 #[derive(Clone)]
 pub struct StateStore {
@@ -53,6 +62,59 @@ impl StateStore {
 
     pub fn state_path(&self) -> PathBuf {
         self.config_dir.join("state.json")
+    }
+
+    pub fn list_backups(&self) -> Result<Vec<BackupEntry>, String> {
+        let _guard = self.lock()?;
+        let backup_dir = self.config_dir.join("backups");
+        if !backup_dir.exists() {
+            return Ok(Vec::new());
+        }
+        let mut paths = state_backups(&backup_dir)?;
+        paths.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+        paths
+            .into_iter()
+            .take(BACKUP_LIMIT)
+            .map(|path| {
+                let metadata = fs::metadata(&path)
+                    .map_err(|error| format!("Could not inspect {}: {error}", path.display()))?;
+                let file_name = path.file_name().unwrap().to_string_lossy().into_owned();
+                let created_at = metadata
+                    .modified()
+                    .map(chrono::DateTime::<Utc>::from)
+                    .map(|time| time.to_rfc3339())
+                    .map_err(|error| format!("Could not read backup date: {error}"))?;
+                Ok(BackupEntry {
+                    file_name,
+                    created_at,
+                    size_bytes: metadata.len(),
+                })
+            })
+            .collect()
+    }
+
+    pub fn restore_backup(&self, file_name: &str) -> Result<AppData, String> {
+        if !valid_backup_name(file_name) {
+            return Err("Invalid backup file name.".into());
+        }
+        let _guard = self.lock()?;
+        let path = self.config_dir.join("backups").join(file_name);
+        let metadata = fs::symlink_metadata(&path)
+            .map_err(|error| format!("Could not inspect backup: {error}"))?;
+        if !metadata.file_type().is_file() {
+            return Err("The selected backup is not a regular file.".into());
+        }
+        let bytes = fs::read(&path).map_err(|error| format!("Could not read backup: {error}"))?;
+        let mut data: AppData = serde_json::from_slice(&bytes)
+            .map_err(|error| format!("The selected backup is invalid JSON: {error}"))?;
+        migrate_app_data(&mut data);
+        // Backups copied from the old AppData folder still point gh config paths there.
+        #[cfg(windows)]
+        if let Ok(old_dir) = legacy_config_dir() {
+            rewrite_gh_config_dirs(&mut data, &old_dir, &self.config_dir);
+        }
+        self.save(&data)?;
+        Ok(data)
     }
 
     pub fn lock(&self) -> Result<StateLock, String> {
@@ -225,15 +287,20 @@ fn state_backups(backup_dir: &Path) -> Result<Vec<PathBuf>, String> {
             .file_type()
             .map_err(|error| format!("Could not inspect backup: {error}"))?
             .is_file();
-        let is_state_backup = entry
-            .file_name()
-            .to_str()
-            .is_some_and(|name| name.starts_with("state-") && name.ends_with(".json"));
+        let is_state_backup = entry.file_name().to_str().is_some_and(valid_backup_name);
         if is_file && is_state_backup {
             backups.push(entry.path());
         }
     }
     Ok(backups)
+}
+
+fn valid_backup_name(name: &str) -> bool {
+    name.starts_with("state-")
+        && name.ends_with(".json")
+        && name.len() > "state-.json".len()
+        && !name.contains("..")
+        && !name.contains(['/', '\\', ':'])
 }
 
 pub fn build_config_dir(release_config_dir: PathBuf) -> Result<PathBuf, String> {
@@ -484,6 +551,82 @@ mod tests {
             return Vec::new();
         }
         state_backups(&backup_dir).unwrap()
+    }
+
+    #[test]
+    fn lists_only_state_backups_newest_first() {
+        let store = temporary_store();
+        let dir = store.config_dir().join("backups");
+        fs::create_dir_all(&dir).unwrap();
+        for name in [
+            "state-20260101.json",
+            "state-20260103.json",
+            "state-20260102.json",
+            "notes.json",
+            "state-.json",
+            "state-bad.json.tmp",
+        ] {
+            fs::write(dir.join(name), b"example").unwrap();
+        }
+        let names: Vec<_> = store
+            .list_backups()
+            .unwrap()
+            .into_iter()
+            .map(|item| item.file_name)
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "state-20260103.json",
+                "state-20260102.json",
+                "state-20260101.json"
+            ]
+        );
+        fs::remove_dir_all(store.config_dir()).unwrap();
+    }
+
+    #[test]
+    fn restore_preserves_current_state_and_rejects_invalid_input() {
+        let store = temporary_store();
+        let mut current = store.load().unwrap();
+        current.settings.locale = Some("ja".into());
+        store.save(&current).unwrap();
+        let backup_dir = store.config_dir().join("backups");
+        let selected = "state-20260101.json";
+        let mut old = AppData::default();
+        old.settings.locale = Some("en".into());
+        fs::write(backup_dir.join(selected), serde_json::to_vec(&old).unwrap()).unwrap();
+        for invalid in [
+            "../state-20260101.json",
+            "state-..json",
+            "state-/other.json",
+            "state-\\other.json",
+            "C:\\state-a.json",
+            "notes.json",
+        ] {
+            assert!(store.restore_backup(invalid).is_err(), "{invalid}");
+        }
+        let corrupt = "state-20260102.json";
+        fs::write(backup_dir.join(corrupt), b"{bad").unwrap();
+        let before = fs::read(store.state_path()).unwrap();
+        assert!(store.restore_backup(corrupt).is_err());
+        assert_eq!(fs::read(store.state_path()).unwrap(), before);
+        assert_eq!(
+            store
+                .restore_backup(selected)
+                .unwrap()
+                .settings
+                .locale
+                .as_deref(),
+            Some("en")
+        );
+        assert_eq!(store.load().unwrap().settings.locale.as_deref(), Some("en"));
+        assert!(store
+            .list_backups()
+            .unwrap()
+            .iter()
+            .any(|item| { fs::read(backup_dir.join(&item.file_name)).unwrap() == before }));
+        fs::remove_dir_all(store.config_dir()).unwrap();
     }
 
     #[test]
