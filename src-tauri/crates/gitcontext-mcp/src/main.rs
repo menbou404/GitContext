@@ -1,4 +1,4 @@
-mod audit;
+use gitcontext_core::audit;
 mod output;
 mod preview;
 

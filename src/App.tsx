@@ -35,6 +35,7 @@ import { ProfileEditor } from "./ui/ProfileEditor";
 import { ProfileList } from "./ui/ProfileList";
 import { FirstRunGuide } from "./ui/FirstRunGuide";
 import { SettingsPage } from "./ui/SettingsPage";
+import { HistoryPage } from "./ui/HistoryPage";
 import { repositoryProfileStatus } from "./ui/profileStatus";
 import "./App.css";
 import "./ui/ui.css";
@@ -516,6 +517,7 @@ function App({ previewLocale }: { previewLocale?: Locale }) {
     <Shell page={page} locale={locale} repositoryCount={data.repositories.length} notice={visibleNotice} noticeLink={!errorNotice && (!environment.gh.available || !environment.ssh.available) ? "settings" : null} onDismiss={() => { if (errorNotice) setErrorNotice(null); else setEnvironmentDismissed(true); }} onNavigate={(nextPage) => { if (nextPage === "profiles" && page !== "profiles") checkedProfiles.current.clear(); setPage(nextPage); setSelectedRepositoryId(null); setEditingProfile(null); setPreview(null); setNotice(null); }}>
       {notice && <p className="ui-result" role="status">{notice}</p>}
       {page === "settings" ? <SettingsPage locale={locale} result={result} onLocaleChange={changeLocale} onEnvironment={(nextEnvironment) => setResult((current) => current ? { ...current, environment: nextEnvironment } : current)} onRestored={(nextResult) => { setResult(nextResult); setSelectedRepositoryId(null); setStatuses({}); setProfileStatuses({}); checkedProfiles.current.clear(); updateLocale(previewLocale ?? resolveLocale(nextResult.data.settings?.locale, navigator.language)); }} />
+        : page === "history" ? <HistoryPage data={data} locale={locale} />
         : page === "profiles" ? editingProfile ? <ProfileEditor key={editingProfile.profile.id} initial={editingProfile.profile} creating={editingProfile.creating} ghAvailable={environment.gh.available} locale={locale} initialStatus={currentProfileStatuses[editingProfile.profile.id]} onStatus={(id, status) => setProfileStatuses((current) => ({ ...current, [id]: status }))} onClose={() => setEditingProfile(null)} onSave={saveProfileAction} onAutoApprove={updateProfileAutoApprove} /> : data.repositories.length === 0 ? <div className="ui-page">{firstRunGuide}{data.profiles.length > 0 && profileList}</div> : profileList
         : selectedRepository ? <RepositoryDetail key={selectedRepository.id} repository={selectedRepository} profiles={data.profiles} status={selectedStatus} pendingProfileId={pendingProfileId} preview={preview} locale={locale} busy={busy} removing={removeConfirmingId === selectedRepository.id}
         onBack={() => { setSelectedRepositoryId(null); setPreview(null); setNotice(null); }} onPendingProfile={setPendingProfileId} onReview={reviewAssignment} onCancelReview={() => setPreview(null)} onApply={applyProfileAction} onAutoApprove={updateAutoApprove}
