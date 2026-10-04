@@ -85,6 +85,9 @@ pub fn inspect_repository_statuses(store: &StateStore, data: &AppData) -> Vec<Re
                         state,
                         branch: Some(branch),
                         uncommitted_changes: Some(changes.len()),
+                        ahead: git_ops::commits_ahead_of_upstream(&repository.path)
+                            .ok()
+                            .flatten(),
                         identity_in_sync,
                         mismatched_keys: mismatches.into_iter().map(|item| item.key).collect(),
                         github,
@@ -100,6 +103,7 @@ pub fn inspect_repository_statuses(store: &StateStore, data: &AppData) -> Vec<Re
                     },
                     branch: repository.branch.clone(),
                     uncommitted_changes: None,
+                    ahead: None,
                     identity_in_sync: false,
                     mismatched_keys: Vec::new(),
                     github,

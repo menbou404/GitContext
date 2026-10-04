@@ -32,6 +32,7 @@ export interface RepositoryStatus {
   state: RepositoryState;
   branch?: string | null;
   uncommittedChanges?: number | null;
+  ahead?: number | null;
   identityInSync: boolean;
   mismatchedKeys: string[];
   github?: GhProfileStatus | null;

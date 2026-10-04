@@ -36,6 +36,13 @@ import type {
 let demoState: AppData = structuredClone(demoBootstrap.data);
 const demoMergedPullRequests = new Set<number>();
 const demoReapplied = new Set<string>();
+const demoChanges = new Map<string, CommitPreview["changes"]>([["repo-personal", [
+  { status: "M", path: "src/player.ts" },
+  { status: "A", path: "assets/levels/level-03.json" },
+  { status: "D", path: "docs/old-notes.md" },
+]]]);
+const demoAhead = new Map<string, number>([["repo-personal", 1], ["repo-school", 0], ["repo-reapply", 1]]);
+const demoBehind = new Map<string, number>([["repo-personal", 0], ["repo-school", 2]]);
 
 const inDesktopApp = () => isTauri();
 const demoLocaleKey = "gitcontext.locale";
@@ -85,7 +92,8 @@ export async function inspectRepositoryStatuses(): Promise<RepositoryStatus[]> {
         repositoryId: repository.id,
         state,
         branch: repository.branch,
-        uncommittedChanges: repository.id === "repo-personal" ? 3 : 0,
+        uncommittedChanges: demoChanges.get(repository.id)?.length ?? 0,
+        ahead: repository.remoteUrl ? demoAhead.get(repository.id) ?? 0 : null,
         identityInSync: state === "ready" || state === "attention",
         mismatchedKeys: state === "reapply" ? ["user.email"] : [],
         github,
@@ -388,6 +396,7 @@ export async function previewPush(repositoryId: string, profileId: string): Prom
 export async function pushRepository(repositoryId: string, profileId: string): Promise<PushResult> {
   if (!inDesktopApp()) {
     const preview = await previewPush(repositoryId, profileId);
+    demoAhead.set(repositoryId, 0);
     return {
       branch: preview.branch,
       remoteUrl: preview.remoteUrl,
@@ -410,9 +419,9 @@ export async function previewRepositorySync(repositoryId: string, profileId: str
       remoteUrl: repository.remoteUrl,
       upstream: `origin/${branch}`,
       remoteBranch: `origin/${branch}`,
-      changes: [],
-      ahead: 1,
-      behind: 2,
+      changes: demoChanges.get(repositoryId) ?? [],
+      ahead: demoAhead.get(repositoryId) ?? 0,
+      behind: demoBehind.get(repositoryId) ?? 0,
       fetchedAt: new Date().toISOString(),
     };
   }
@@ -422,6 +431,7 @@ export async function previewRepositorySync(repositoryId: string, profileId: str
 export async function pullRepository(repositoryId: string, profileId: string): Promise<SyncPreview> {
   if (!inDesktopApp()) {
     const preview = await previewRepositorySync(repositoryId, profileId);
+    demoBehind.set(repositoryId, 0);
     return { ...preview, ahead: 0, behind: 0, fetchedAt: new Date().toISOString() };
   }
   return invoke<SyncPreview>("pull_repository", { repositoryId, profileId });
@@ -436,10 +446,7 @@ export async function previewCommit(repositoryId: string, profileId: string): Pr
       repository: structuredClone(repository),
       profile: structuredClone(profile),
       branch: repository.branch || "main",
-      changes: [
-        { status: "M", path: "src/App.tsx" },
-        { status: "??", path: "notes.md" },
-      ],
+      changes: demoChanges.get(repositoryId) ?? [],
       pushRemoteUrl: repository.remoteUrl || null,
       pushUnavailableReason: repository.remoteUrl ? null : "This repository does not have an origin remote.",
     };
@@ -455,6 +462,8 @@ export async function commitRepository(
   if (!inDesktopApp()) {
     const preview = await previewCommit(repositoryId, profileId);
     if (!message.trim()) throw new Error("Commit message must contain 1 to 200 characters on one line.");
+    demoChanges.set(repositoryId, []);
+    demoAhead.set(repositoryId, (demoAhead.get(repositoryId) ?? 0) + 1);
     return { branch: preview.branch, commitId: "a1b2c3d", message: message.trim() };
   }
   return invoke<CommitResult>("commit_repository", { repositoryId, profileId, message });
@@ -477,10 +486,7 @@ export async function previewPullRequest(
       baseBranch,
       remoteUrl: repository.remoteUrl,
       repositoryNameWithOwner: repository.remoteUrl.replace("git@github.com:", "").replace(/\.git$/, ""),
-      changes: [
-        { status: "M", path: "src/App.tsx" },
-        { status: "??", path: "docs/pr-workflow.md" },
-      ],
+      changes: demoChanges.get(repositoryId) ?? [],
       commitsAhead: currentBranch === baseBranch ? 0 : 1,
       branchPushed: currentBranch !== baseBranch,
       requiresNewBranch: currentBranch === baseBranch,

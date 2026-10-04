@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { PlusIcon, SearchIcon } from "../Icons";
-import { shellCopy, type Locale } from "../i18n";
+import { shellCopy, tabCopy, type Locale } from "../i18n";
 import type { Profile, RepositoryRecord, RepositoryStatus } from "../types";
 import { ProfileDot } from "./ProfileDot";
 import { StatusLabel } from "./StatusLabel";
@@ -39,7 +39,7 @@ export function RepositoryList({ repositories, profiles, statuses, locale, busy,
       <button className="ui-refresh" type="button" onClick={onRefresh}>{copy.refresh}</button>
     </div>
     <table className="ui-table" aria-label={copy.repositories}>
-      <thead><tr><th scope="col">{copy.name}</th><th scope="col">{copy.profile}</th><th scope="col">{copy.branch}</th><th scope="col">{copy.status}</th><th scope="col">{copy.changes}</th></tr></thead>
+      <thead><tr><th scope="col">{copy.name}</th><th scope="col">{copy.profile}</th><th scope="col">{copy.branch}</th><th scope="col">{copy.status}</th><th scope="col">{copy.changes}</th><th scope="col" title={tabCopy[locale].localCount}>{copy.pushWaitingHeader}</th></tr></thead>
       <tbody>
       {visible.map((repository) => {
         const profile = profiles.find((item) => item.id === repository.profileId);
@@ -51,9 +51,10 @@ export function RepositoryList({ repositories, profiles, statuses, locale, busy,
           <td className="ui-mono">{status?.branch ?? repository.branch ?? "—"}</td>
           <td><StatusLabel state={state} locale={locale} /></td>
           <td className="ui-muted">{status?.uncommittedChanges ? copy.uncommitted(status.uncommittedChanges) : ""}</td>
+          <td className="ui-muted" title={tabCopy[locale].localCount}>{status?.ahead == null ? tabCopy[locale].unknown : copy.pushWaiting(status.ahead)}</td>
         </tr>;
       })}
-      {!visible.length && <tr><td className="ui-empty" colSpan={5}>{copy.noRepositories}</td></tr>}
+      {!visible.length && <tr><td className="ui-empty" colSpan={6}>{copy.noRepositories}</td></tr>}
       </tbody>
     </table>
   </div>;
