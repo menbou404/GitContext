@@ -6,12 +6,14 @@ import { ProfileDot } from "./ProfileDot";
 import { StatusLabel } from "./StatusLabel";
 import { filterRepositories, type RepositoryFilter } from "./status";
 
-export function RepositoryList({ repositories, profiles, statuses, locale, busy, onOpen, onAdd, onClone, onRefresh }: {
+export function RepositoryList({ repositories, profiles, statuses, locale, busy, refreshing, refreshedAt, onOpen, onAdd, onClone, onRefresh }: {
   repositories: RepositoryRecord[];
   profiles: Profile[];
   statuses: Record<string, RepositoryStatus>;
   locale: Locale;
   busy: boolean;
+  refreshing: boolean;
+  refreshedAt: Date | null;
   onOpen: (id: string) => void;
   onAdd: () => void;
   onClone: () => void;
@@ -36,7 +38,10 @@ export function RepositoryList({ repositories, profiles, statuses, locale, busy,
     </div>
     <div className="ui-filter-row" role="group" aria-label={copy.filterLabel}>
       {(["all", "action", "unassigned"] as const).map((option) => <button type="button" key={option} aria-pressed={filter === option} onClick={() => setFilter(option)}>{copy[option === "action" ? "needsAction" : option === "unassigned" ? "unassignedFilter" : "all"]} {counts[option]}</button>)}
-      <button className="ui-refresh" type="button" onClick={onRefresh}>{copy.refresh}</button>
+      <span className="ui-refresh">
+        {refreshedAt && !refreshing && <span className="ui-muted" aria-live="polite">{copy.refreshedAt(refreshedAt.toLocaleTimeString(locale === "ja" ? "ja-JP" : "en-US", { hour: "2-digit", minute: "2-digit" }))}</span>}
+        <button className="ui-button" type="button" onClick={onRefresh} disabled={refreshing}>{refreshing ? copy.refreshing : copy.refresh}</button>
+      </span>
     </div>
     <table className="ui-table" aria-label={copy.repositories}>
       <thead><tr><th scope="col">{copy.name}</th><th scope="col">{copy.profile}</th><th scope="col">{copy.branch}</th><th scope="col">{copy.status}</th><th scope="col">{copy.changes}</th><th scope="col" title={tabCopy[locale].localCount}>{copy.pushWaitingHeader}</th></tr></thead>

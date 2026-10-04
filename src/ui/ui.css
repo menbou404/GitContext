@@ -61,7 +61,7 @@ html, body, #root { min-width: 1050px; }
 .ui-filter-row { display: flex; align-items: center; gap: 6px; }
 .ui-filter-row button { min-height: 30px; padding: 0 12px; border: 1px solid var(--ui-input-line); border-radius: 15px; background: transparent; color: var(--ui-ink); font-size: 13px; }
 .ui-filter-row button[aria-pressed="true"] { border-color: var(--ui-ink); background: var(--ui-surface); font-weight: 600; }
-.ui-filter-row .ui-refresh { margin-left: auto; border: 0; border-radius: 6px; color: var(--ui-muted); }
+.ui-filter-row .ui-refresh { margin-left: auto; display: inline-flex; align-items: center; gap: 12px; font-size: 12px; }
 .ui-table { width: 100%; table-layout: fixed; border-spacing: 0; border: 1px solid var(--ui-line); border-radius: 8px; background: var(--ui-surface); }
 .ui-table th, .ui-table td { padding: 10px 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
 .ui-table th:first-child, .ui-table td:first-child { padding-left: 20px; width: 27%; }

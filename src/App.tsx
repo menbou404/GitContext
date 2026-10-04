@@ -542,6 +542,8 @@ function App({ previewLocale }: { previewLocale?: Locale }) {
   const [environmentDismissed, setEnvironmentDismissed] = useState(false);
   const [statuses, setStatuses] = useState<Record<string, RepositoryStatus>>({});
   const statusRefresh = useRef({ at: 0, running: false });
+  const [statusRefreshing, setStatusRefreshing] = useState(false);
+  const [statusesRefreshedAt, setStatusesRefreshedAt] = useState<Date | null>(null);
   const [page, setPage] = useState<ShellPage>("repositories");
   const [selectedRepositoryId, setSelectedRepositoryId] = useState<string | null>(null);
   const [pendingProfileId, setPendingProfileId] = useState("");
@@ -587,11 +589,19 @@ function App({ previewLocale }: { previewLocale?: Locale }) {
   const pendingProfile = data?.profiles.find((profile) => profile.id === pendingProfileId) ?? null;
 
   const refreshStatuses = () => {
+    if (statusRefresh.current.running) return;
     statusRefresh.current = { at: Date.now(), running: true };
+    setStatusRefreshing(true);
     inspectRepositoryStatuses()
-      .then((items) => setStatuses(Object.fromEntries(items.map((item) => [item.repositoryId, item]))))
+      .then((items) => {
+        setStatuses(Object.fromEntries(items.map((item) => [item.repositoryId, item])));
+        setStatusesRefreshedAt(new Date());
+      })
       .catch((error) => setErrorNotice(`${messageFrom(error, locale)} ${shellCopy[locale].refresh}`))
-      .finally(() => { statusRefresh.current.running = false; });
+      .finally(() => {
+        statusRefresh.current.running = false;
+        setStatusRefreshing(false);
+      });
   };
 
   useEffect(() => {
@@ -749,7 +759,7 @@ function App({ previewLocale }: { previewLocale?: Locale }) {
         onBack={() => { setSelectedRepositoryId(null); setPreview(null); setNotice(null); }} onPendingProfile={setPendingProfileId} onReview={reviewAssignment} onCancelReview={() => setPreview(null)} onApply={applyProfileAction} onAutoApprove={updateAutoApprove}
         onStartRemove={() => setRemoveConfirmingId(selectedRepository.id)} onCancelRemove={() => setRemoveConfirmingId(null)} onRemove={removeSelected}
         onData={updateData} onFinished={refreshStatuses} />
-        : <RepositoryList repositories={data.repositories} profiles={data.profiles} statuses={statuses} locale={locale} busy={busy} onOpen={selectRepository} onAdd={addRepo} onClone={() => setCloneOpen(true)} onRefresh={refreshStatuses} />}
+        : <RepositoryList repositories={data.repositories} profiles={data.profiles} statuses={statuses} locale={locale} busy={busy} refreshing={statusRefreshing} refreshedAt={statusesRefreshedAt} onOpen={selectRepository} onAdd={addRepo} onClone={() => setCloneOpen(true)} onRefresh={refreshStatuses} />}
 
       {cloneOpen && <CloneDialog profiles={data.profiles} locale={locale} onClose={() => setCloneOpen(false)} onClone={cloneRepositoryAction} />}
     </Shell>
