@@ -5,6 +5,7 @@
 ## [Unreleased]
 
 ### Added
+- GUIから設定する「AIによる操作の自動承認」。リポジトリごとに作業ブランチへのpush、既定ブランチへのpush、Pull Requestの作成とmerge、GitHubへの公開を個別に設定でき、プロファイルごとにcloneを設定できる。MCPは有効な項目を確認なしで実行する
 
 - Profile-aware Fetch、ahead/behind表示、安全なFast-forward Pull、Pushをまとめたリポジトリ同期フロー
 - ProfileのGitHub一覧またはSSH URLからcloneし、同じIdentityを自動適用するフロー
@@ -26,6 +27,7 @@
 
 ### Fixed
 
+- Tauri WebViewで`window.confirm`が表示されないまま設定や削除が進む問題。自動承認はチェック時に保存し、GitContextからの削除は画面内に「削除する／やめる」の確認を表示
 - MCPの即時自動応答を人の拒否・承認と区別して拒否し、監査ログにも記録。Claude CodeのデスクトップCodeタブを補助的に検出して確認画面を出さずに拒否し、`--trust-client-approval`指定時も対応クライアントではGitContextの確認画面を優先
 - MCPのクライアント情報とelicitation対応をリクエストごとに判定し、モダンプロトコルの`_meta`とMRTRによる確認に対応。レガシーの`elicitation/create`も維持
 - Profileから外したGitHubユーザー名・gh設定ディレクトリ・SSH鍵の設定が、再適用後もリポジトリのローカル設定に残る問題（適用前のプレビューに「削除」と表示し、GitContextが書いた`core.sshCommand`だけを削除）

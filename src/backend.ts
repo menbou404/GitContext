@@ -4,6 +4,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { demoBootstrap } from "./demoData";
 import type {
   AppData,
+  AutoApprove,
   ApplyPreview,
   BootstrapResult,
   BranchResult,
@@ -17,6 +18,7 @@ import type {
   MergePullRequestOptions,
   MergePullRequestResult,
   Profile,
+  ProfileAutoApprove,
   PublishOptions,
   PublishResult,
   PullRequestCreateOptions,
@@ -104,6 +106,7 @@ export async function addRepository(path: string): Promise<RepositoryRecord> {
       branch: "main",
       profileId: null,
       lastAppliedAt: null,
+      autoApprove: { pushWorkBranch: false, pushDefaultBranch: false, createPullRequest: false, mergePullRequest: false, publishRepository: false },
     };
     demoState.repositories = [...demoState.repositories, record];
     return structuredClone(record);
@@ -117,6 +120,16 @@ export async function removeRepository(id: string): Promise<AppData> {
     return structuredClone(demoState);
   }
   return invoke<AppData>("remove_repository", { id });
+}
+
+export async function setRepositoryAutoApprove(repositoryId: string, autoApprove: AutoApprove): Promise<AppData> {
+  if (!inDesktopApp()) {
+    const repository = demoState.repositories.find((item) => item.id === repositoryId);
+    if (!repository) throw new Error("Repository was not found.");
+    repository.autoApprove = { ...autoApprove };
+    return structuredClone(demoState);
+  }
+  return invoke<AppData>("set_repository_auto_approve", { repositoryId, autoApprove });
 }
 
 export async function listGithubRepositories(profileId: string): Promise<GithubRepository[]> {
@@ -154,6 +167,7 @@ export async function cloneGithubRepository(options: CloneOptions): Promise<Clon
       branch: "main",
       profileId: profile.id,
       lastAppliedAt: new Date().toISOString(),
+      autoApprove: { pushWorkBranch: false, pushDefaultBranch: false, createPullRequest: false, mergePullRequest: false, publishRepository: false },
     };
     demoState.repositories = [...demoState.repositories, repository];
     return { data: structuredClone(demoState), repository: structuredClone(repository) };
@@ -168,6 +182,8 @@ export async function cloneGithubRepository(options: CloneOptions): Promise<Clon
 export async function saveProfile(profile: Profile): Promise<AppData> {
   if (!inDesktopApp()) {
     const next = { ...profile, id: profile.id || nextDemoId("profile") };
+    const existing = demoState.profiles.find((item) => item.id === next.id);
+    if (existing) next.autoApprove = { ...existing.autoApprove };
     const exists = demoState.profiles.some((item) => item.id === next.id);
     demoState.profiles = exists
       ? demoState.profiles.map((item) => (item.id === next.id ? next : item))
@@ -175,6 +191,16 @@ export async function saveProfile(profile: Profile): Promise<AppData> {
     return structuredClone(demoState);
   }
   return invoke<AppData>("save_profile", { profile });
+}
+
+export async function setProfileAutoApprove(profileId: string, autoApprove: ProfileAutoApprove): Promise<AppData> {
+  if (!inDesktopApp()) {
+    const profile = demoState.profiles.find((item) => item.id === profileId);
+    if (!profile) throw new Error("Profile was not found.");
+    profile.autoApprove = { ...autoApprove };
+    return structuredClone(demoState);
+  }
+  return invoke<AppData>("set_profile_auto_approve", { profileId, autoApprove });
 }
 
 export async function inspectGithubProfile(

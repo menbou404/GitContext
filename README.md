@@ -105,7 +105,7 @@ Windowsでは、配布版は`%USERPROFILE%\.gitcontext`、`npm run tauri dev`な
 
 ### MCPサーバー（開発中）
 
-AIエージェントからGitContextのProfileとリポジトリを扱うMCPサーバー`gitcontext-mcp`を開発中です。既定では読み取り専用のツールだけを公開します。`--max-tier local`を付けて起動すると、プロファイルの適用、ブランチ作成、commit、pullなどのローカルの変更も、プレビューで確認した内容に限って実行できます。`--max-tier remote`を付けると、push、Pull Requestの作成とmerge、clone、GitHubへの公開も実行でき、実行の前にAIクライアントの画面で確認を求めます（MCPのelicitation）。確認画面を表示できないクライアントでは、GitHub操作は実行されません。`--trust-client-approval`を付けた場合、確認画面を表示できるクライアントでは引き続きGitContextの確認画面を使い、表示できないクライアントではクライアント自身の確認に任せます。後者で自動承認を有効にしていると、確認なしにpushやmergeが実行されます。AIによる変更の操作は、データフォルダの`mcp-audit.jsonl`に記録されます。設計は[docs/MCP_DESIGN.md](docs/MCP_DESIGN.md)を参照してください。
+AIエージェントからGitContextのProfileとリポジトリを扱うMCPサーバー`gitcontext-mcp`を開発中です。既定では読み取り専用のツールだけを公開します。`--max-tier local`を付けて起動すると、プロファイルの適用、ブランチ作成、commit、pullなどのローカルの変更も、プレビューで確認した内容に限って実行できます。`--max-tier remote`を付けると、push、Pull Requestの作成とmerge、clone、GitHubへの公開も実行でき、実行の前にAIクライアントの画面で確認を求めます（MCPのelicitation）。確認画面を表示できないクライアントでは、通常はGitHub操作を実行しません。`--trust-client-approval`を付けた場合、確認画面を表示できるクライアントでは引き続きGitContextの確認画面を使い、表示できないクライアントではクライアント自身の確認に任せます。後者で自動承認を有効にしていると、確認なしにpushやmergeが実行されます。GUIのリポジトリ詳細では、作業ブランチへのpush、既定ブランチへのpush、Pull Requestの作成とmerge、GitHubへの公開をそれぞれ自動承認できます。プロファイルの編集画面では、そのプロファイルを使うcloneを自動承認できます。各項目は既定で無効で、有効にした操作は確認画面を出せないクライアントでもMCPの確認なしで実行されます。AIによる変更の操作は、データフォルダの`mcp-audit.jsonl`に記録されます。設計は[docs/MCP_DESIGN.md](docs/MCP_DESIGN.md)を参照してください。
 
 ```powershell
 cargo build --manifest-path src-tauri\Cargo.toml -p gitcontext-mcp

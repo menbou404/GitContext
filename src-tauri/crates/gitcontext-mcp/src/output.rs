@@ -1,6 +1,6 @@
 use gitcontext_core::models::{
-    AppData, ApplyPreview, ConfigChange, ManagedPullRequest, Profile, PullRequestSummary,
-    RepositoryRecord, WorkingTreeChange,
+    AppData, ApplyPreview, AutoApprove, ConfigChange, ManagedPullRequest, Profile,
+    PullRequestSummary, RepositoryRecord, WorkingTreeChange,
 };
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -29,6 +29,7 @@ pub struct ProfileDto<'a> {
     git_name: &'a str,
     git_email: &'a str,
     github_username: &'a Option<String>,
+    auto_approve: &'a gitcontext_core::models::ProfileAutoApprove,
     ssh_key: SshKeyDto,
     #[serde(skip_serializing_if = "Option::is_none")]
     github: Option<GithubDto>,
@@ -42,6 +43,7 @@ impl<'a> ProfileDto<'a> {
             git_name: &profile.git_name,
             git_email: &profile.git_email,
             github_username: &profile.github_username,
+            auto_approve: &profile.auto_approve,
             ssh_key: SshKeyDto {
                 configured: profile.ssh_key_path.is_some(),
                 file_name: profile.ssh_key_path.as_deref().and_then(file_name),
@@ -63,6 +65,7 @@ pub struct RepositoryDto<'a> {
     profile_label: Option<&'a str>,
     applied: bool,
     last_applied_at: &'a Option<String>,
+    auto_approve: &'a AutoApprove,
 }
 
 impl<'a> RepositoryDto<'a> {
@@ -82,6 +85,7 @@ impl<'a> RepositoryDto<'a> {
             }),
             applied: repository.last_applied_at.is_some(),
             last_applied_at: &repository.last_applied_at,
+            auto_approve: &repository.auto_approve,
         }
     }
 }
@@ -166,6 +170,7 @@ mod tests {
             github_username: Some("fictional".into()),
             ssh_key_path: Some("C:\\Fictional\\.ssh\\id_example".into()),
             gh_config_dir: Some("C:\\Fictional\\gh-private".into()),
+            auto_approve: Default::default(),
         };
         let profile_json = serde_json::to_string(&ProfileDto::new(&profile, None)).unwrap();
         assert!(profile_json.contains("id_example"));
@@ -179,6 +184,7 @@ mod tests {
                 branch: None,
                 profile_id: None,
                 last_applied_at: None,
+                auto_approve: AutoApprove::default(),
             },
             profile,
             changes: vec![

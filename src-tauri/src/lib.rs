@@ -18,6 +18,8 @@ pub fn run() {
             commands::connect_github_profile,
             commands::open_github_auth_page,
             commands::add_repository,
+            commands::set_repository_auto_approve,
+            commands::set_profile_auto_approve,
             commands::remove_repository,
             commands::preview_assignment,
             commands::apply_profile,
