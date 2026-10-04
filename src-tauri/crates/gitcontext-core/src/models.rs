@@ -186,6 +186,7 @@ pub struct RepositoryStatus {
     pub state: RepositoryState,
     pub branch: Option<String>,
     pub uncommitted_changes: Option<usize>,
+    pub ahead: Option<u64>,
     pub identity_in_sync: bool,
     pub mismatched_keys: Vec<String>,
     pub github: Option<GhProfileStatus>,

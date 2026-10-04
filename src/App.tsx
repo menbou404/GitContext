@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import {
   addRepository,
   applyAssignment,
@@ -8,25 +8,13 @@ import {
   chooseRepositoryDirectory,
   chooseSshKey,
   cloneGithubRepository,
-  commitRepository,
   connectGithubProfile,
-  createBranch,
-  createPullRequest,
   inspectGithubProfile,
   inspectRepositoryStatuses,
   listenForGithubAuthPrompt,
   listGithubRepositories,
-  listPullRequests,
-  mergePullRequest,
   openGithubAuthPage,
   previewAssignment,
-  previewCommit,
-  previewPullRequest,
-  previewPush,
-  previewRepositorySync,
-  publishRepository,
-  pullRepository,
-  pushRepository,
   removeRepository,
   saveProfile,
   setLocale,
@@ -43,7 +31,7 @@ import {
   ShieldIcon,
   TerminalIcon,
 } from "./Icons";
-import type { AppData, ApplyPreview, AutoApprove, BootstrapResult, CloneOptions, CommitPreview, GhProfileStatus, GithubAuthPrompt, GithubRepository, ManagedPullRequest, MergePullRequestResult, MergeStrategy, Profile, PublishOptions, PullRequestManagement, PullRequestPreview, PullRequestResult, PushPreview, RepositoryRecord, RepositoryVisibility, SyncPreview } from "./types";
+import type { AppData, ApplyPreview, AutoApprove, BootstrapResult, CloneOptions, GhProfileStatus, GithubAuthPrompt, GithubRepository, Profile } from "./types";
 import type { RepositoryStatus } from "./types";
 import { initials, profileIsComplete } from "./types";
 import { localizeRuntimeMessage, shellCopy, uiCopy, type Locale } from "./i18n";
@@ -51,6 +39,7 @@ import { resolveLocale } from "./locale";
 import { Shell, type ShellPage } from "./ui/Shell";
 import { RepositoryList } from "./ui/RepositoryList";
 import { RepositoryDetail } from "./ui/RepositoryDetail";
+import { shouldRefreshOnFocus } from "./ui/status";
 import { ProfileDot } from "./ui/ProfileDot";
 import "./App.css";
 import "./ui/ui.css";
@@ -366,493 +355,6 @@ function ProfileEditor({
   );
 }
 
-function PublishDialog({
-  repository,
-  profile,
-  locale,
-  onClose,
-  onPublish,
-}: {
-  repository: RepositoryRecord;
-  profile: Profile;
-  locale: Locale;
-  onClose: () => void;
-  onPublish: (options: PublishOptions) => Promise<void>;
-}) {
-  const copy = uiCopy[locale];
-  const [name, setName] = useState(repository.name);
-  const [description, setDescription] = useState("");
-  const [visibility, setVisibility] = useState<RepositoryVisibility>("private");
-  const [publishing, setPublishing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const owner = profile.githubUsername ?? "";
-
-  const publish = async (event: FormEvent) => {
-    event.preventDefault();
-    setPublishing(true);
-    setError(null);
-    try {
-      await onPublish({ repositoryId: repository.id, profileId: profile.id, name, visibility, description });
-    } catch (cause) {
-      setError(messageFrom(cause, locale));
-      setPublishing(false);
-    }
-  };
-
-  return (
-    <div className="modal-layer" role="presentation" onMouseDown={onClose}>
-      <form className="modal publish-modal" onSubmit={publish} onMouseDown={(event) => event.stopPropagation()}>
-        <div className="modal-header">
-          <div>
-            <p className="eyebrow">GitHub</p>
-            <h2>{copy.publishRepository}</h2>
-          </div>
-          <button className="icon-button" type="button" onClick={onClose} aria-label={copy.close}><CloseIcon /></button>
-        </div>
-        <p className="modal-lead">{copy.publishLead}</p>
-
-        <div className="publish-destination">
-          <ProfileAvatar profile={profile} />
-          <div><span>{copy.publishDestination}</span><strong>@{owner} / {name || "…"}</strong></div>
-        </div>
-
-        <div className="profile-form-grid publish-form-grid">
-          <label className="field">
-            <span>{copy.githubRepositoryName}</span>
-            <input required maxLength={100} pattern="[A-Za-z0-9._-]+" value={name} onChange={(event) => setName(event.currentTarget.value)} />
-          </label>
-          <label className="field">
-            <span>{copy.visibility}</span>
-            <select value={visibility} onChange={(event) => setVisibility(event.currentTarget.value as RepositoryVisibility)}>
-              <option value="private">{copy.privateRepository}</option>
-              <option value="public">{copy.publicRepository}</option>
-            </select>
-          </label>
-          <label className="field field--wide">
-            <span>{copy.description} <small>{copy.optional}</small></span>
-            <input maxLength={350} value={description} onChange={(event) => setDescription(event.currentTarget.value)} placeholder={copy.descriptionPlaceholder} />
-          </label>
-        </div>
-
-        <div className={`publish-scope ${visibility === "public" ? "is-public" : ""}`}>
-          <ShieldIcon />
-          <div><strong>{visibility === "private" ? copy.privatePublishTitle : copy.publicPublishTitle}</strong><span>{visibility === "private" ? copy.privatePublishLead : copy.publicPublishLead}</span></div>
-        </div>
-
-        <ol className="publish-steps">
-          <li>{copy.createGithubRepository}</li>
-          <li>{copy.addOriginRemote}</li>
-          <li>{copy.pushCurrentBranch(repository.branch || copy.noBranch)}</li>
-        </ol>
-
-        {error && <div className="inline-error"><AlertIcon />{error}</div>}
-        <div className="modal-actions">
-          <button className="button button--ghost" type="button" onClick={onClose} disabled={publishing}>{copy.cancel}</button>
-          <button className="button button--primary" type="submit" disabled={publishing || !owner}>{publishing ? copy.publishing : copy.createAndPush}</button>
-        </div>
-      </form>
-    </div>
-  );
-}
-
-function PushDialog({
-  preview,
-  locale,
-  onClose,
-  onPush,
-}: {
-  preview: PushPreview;
-  locale: Locale;
-  onClose: () => void;
-  onPush: () => Promise<void>;
-}) {
-  const copy = uiCopy[locale];
-  const [pushing, setPushing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const push = async () => {
-    setPushing(true);
-    setError(null);
-    try {
-      await onPush();
-    } catch (cause) {
-      setError(messageFrom(cause, locale));
-      setPushing(false);
-    }
-  };
-
-  return (
-    <div className="modal-layer" role="presentation" onMouseDown={onClose}>
-      <section className="modal push-modal" role="dialog" aria-modal="true" aria-labelledby="push-title" onMouseDown={(event) => event.stopPropagation()}>
-        <div className="modal-header">
-          <div>
-            <p className="eyebrow">GitHub</p>
-            <h2 id="push-title">{copy.pushDialogTitle}</h2>
-          </div>
-          <button className="icon-button" type="button" onClick={onClose} aria-label={copy.close}><CloseIcon /></button>
-        </div>
-        <p className="modal-lead">{copy.pushDialogLead}</p>
-
-        <div className="publish-destination">
-          <ProfileAvatar profile={preview.profile} />
-          <div><span>{copy.pushProfile}</span><strong>{preview.profile.label}{preview.profile.githubUsername ? ` · @${preview.profile.githubUsername}` : ""}</strong></div>
-        </div>
-
-        <dl className="push-details">
-          <div><dt>{copy.pushRemote}</dt><dd title={preview.remoteUrl}>{preview.remoteUrl}</dd></div>
-          <div><dt>{copy.pushBranch}</dt><dd>{preview.branch}</dd></div>
-          <div><dt>{copy.pushUpstream}</dt><dd>{preview.upstream || copy.noUpstream}</dd></div>
-        </dl>
-
-        <div className="push-safety-note">
-          <ShieldIcon />
-          <div><strong>{copy.pushCommittedOnlyTitle}</strong><span>{copy.pushCommittedOnlyLead}</span><small>{copy.normalPushOnly}</small></div>
-        </div>
-        {preview.hasUncommittedChanges && <div className="warning-note"><AlertIcon />{copy.uncommittedChangesPresent}</div>}
-        {error && <div className="inline-error"><AlertIcon />{error}</div>}
-        <div className="modal-actions">
-          <button className="button button--ghost" type="button" onClick={onClose} disabled={pushing}>{copy.cancel}</button>
-          <button className="button button--primary" type="button" onClick={push} disabled={pushing}>{pushing ? copy.pushingBranch : copy.confirmPush}</button>
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function SyncDialog({
-  preview,
-  locale,
-  onClose,
-  onRefresh,
-  onPull,
-  onPush,
-}: {
-  preview: SyncPreview;
-  locale: Locale;
-  onClose: () => void;
-  onRefresh: () => Promise<SyncPreview>;
-  onPull: () => Promise<SyncPreview>;
-  onPush: () => Promise<SyncPreview>;
-}) {
-  const copy = uiCopy[locale];
-  const [action, setAction] = useState<"fetch" | "pull" | "push" | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const running = action !== null;
-  const diverged = preview.ahead > 0 && preview.behind > 0;
-  const dirty = preview.changes.length > 0;
-  const canPull = preview.behind > 0 && preview.ahead === 0 && !dirty && Boolean(preview.remoteBranch);
-  const canPush = !diverged && (preview.ahead > 0 || !preview.remoteBranch);
-  const upToDate = Boolean(preview.remoteBranch) && preview.ahead === 0 && preview.behind === 0;
-
-  const run = async (nextAction: "fetch" | "pull" | "push") => {
-    setAction(nextAction);
-    setError(null);
-    try {
-      if (nextAction === "fetch") await onRefresh();
-      if (nextAction === "pull") await onPull();
-      if (nextAction === "push") await onPush();
-      setAction(null);
-    } catch (cause) {
-      setError(messageFrom(cause, locale));
-      setAction(null);
-    }
-  };
-
-  return (
-    <div className="modal-layer" role="presentation" onMouseDown={onClose}>
-      <section className="modal sync-modal" role="dialog" aria-modal="true" aria-labelledby="sync-title" onMouseDown={(event) => event.stopPropagation()}>
-        <div className="modal-header">
-          <div><p className="eyebrow">Git</p><h2 id="sync-title">{copy.syncDialogTitle}</h2></div>
-          <button className="icon-button" type="button" onClick={onClose} aria-label={copy.close}><CloseIcon /></button>
-        </div>
-        <p className="modal-lead">{copy.syncDialogLead}</p>
-
-        <div className="publish-destination">
-          <ProfileAvatar profile={preview.profile} />
-          <div><span>{copy.syncProfile}</span><strong>{preview.profile.label}{preview.profile.githubUsername ? ` · @${preview.profile.githubUsername}` : ""}</strong></div>
-        </div>
-
-        <dl className="push-details">
-          <div><dt>{copy.repository}</dt><dd>{preview.repository.name}</dd></div>
-          <div><dt>{copy.syncBranch}</dt><dd>{preview.branch}</dd></div>
-          <div><dt>{copy.syncTracking}</dt><dd>{preview.upstream || preview.remoteBranch || copy.noRemoteBranch}</dd></div>
-          <div><dt>{copy.lastFetched}</dt><dd>{new Date(preview.fetchedAt).toLocaleString(locale === "ja" ? "ja-JP" : "en-US")}</dd></div>
-        </dl>
-
-        <div className="sync-counts">
-          <div className={preview.ahead > 0 ? "has-count" : ""}><strong>{preview.ahead}</strong><span>{copy.aheadCommits}</span></div>
-          <div className={preview.behind > 0 ? "has-count" : ""}><strong>{preview.behind}</strong><span>{copy.behindCommits}</span></div>
-        </div>
-
-        {upToDate && <div className="sync-ready"><CheckIcon /><div><strong>{copy.repositoryUpToDate}</strong><span>{copy.repositoryUpToDateLead}</span></div></div>}
-        {!preview.remoteBranch && <div className="warning-note"><AlertIcon />{copy.remoteBranchMissing}</div>}
-        {diverged && <div className="warning-note"><AlertIcon /><div><strong>{copy.branchesDiverged}</strong><br />{copy.branchesDivergedLead}</div></div>}
-        {dirty && <div className="warning-note"><AlertIcon />{copy.pullBlockedByChanges(preview.changes.length)}</div>}
-        {error && <div className="inline-error"><AlertIcon />{error}</div>}
-
-        <div className="push-safety-note">
-          <ShieldIcon />
-          <div><strong>{copy.fastForwardOnly}</strong><span>{copy.fastForwardOnlyLead}</span></div>
-        </div>
-
-        <div className="modal-actions sync-actions">
-          <button className="button button--ghost" type="button" onClick={onClose} disabled={running}>{copy.close}</button>
-          <button className="button button--ghost" type="button" onClick={() => run("fetch")} disabled={running}>{action === "fetch" ? copy.fetching : copy.fetchAgain}</button>
-          <button className="button button--ghost" type="button" onClick={() => run("pull")} disabled={!canPull || running}>{action === "pull" ? copy.pulling : copy.pullChanges}</button>
-          <button className="button button--primary" type="button" onClick={() => run("push")} disabled={!canPush || running}>{action === "push" ? copy.pushingBranch : copy.pushChanges}</button>
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function CommitDialog({
-  preview,
-  locale,
-  onClose,
-  onCommit,
-}: {
-  preview: CommitPreview;
-  locale: Locale;
-  onClose: () => void;
-  onCommit: (message: string, pushAfterCommit: boolean) => Promise<void>;
-}) {
-  const copy = uiCopy[locale];
-  const [message, setMessage] = useState("");
-  const [action, setAction] = useState<"commit" | "push" | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const hasChanges = preview.changes.length > 0;
-  const messageIsValid = message.trim().length > 0 && message.trim().length <= 200 && !/[\r\n]/.test(message);
-
-  const commit = async (pushAfterCommit: boolean) => {
-    setAction(pushAfterCommit ? "push" : "commit");
-    setError(null);
-    try {
-      await onCommit(message, pushAfterCommit);
-    } catch (cause) {
-      setError(messageFrom(cause, locale));
-      setAction(null);
-    }
-  };
-
-  return (
-    <div className="modal-layer" role="presentation" onMouseDown={onClose}>
-      <section className="modal commit-modal" role="dialog" aria-modal="true" aria-labelledby="commit-title" onMouseDown={(event) => event.stopPropagation()}>
-        <div className="modal-header">
-          <div>
-            <p className="eyebrow">Git</p>
-            <h2 id="commit-title">{copy.commitDialogTitle}</h2>
-          </div>
-          <button className="icon-button" type="button" onClick={onClose} aria-label={copy.close}><CloseIcon /></button>
-        </div>
-        <p className="modal-lead">{copy.commitDialogLead}</p>
-
-        <div className="publish-destination">
-          <ProfileAvatar profile={preview.profile} />
-          <div><span>{copy.commitProfile}</span><strong>{preview.profile.label} · {preview.profile.gitName} &lt;{preview.profile.gitEmail}&gt;</strong></div>
-        </div>
-
-        <dl className="push-details">
-          <div><dt>{copy.commitBranch}</dt><dd>{preview.branch}</dd></div>
-          <div><dt>{copy.repository}</dt><dd>{preview.repository.name}</dd></div>
-        </dl>
-
-        {hasChanges ? (
-          <>
-            <p className="commit-change-heading">{copy.changesToCommit(preview.changes.length)}</p>
-            <div className="commit-change-list" aria-label={copy.changesToCommit(preview.changes.length)}>
-              {preview.changes.map((change, index) => (
-                <div className="commit-change-row" key={`${change.status}-${change.path}-${index}`}>
-                  <code>{change.status || "M"}</code><span title={change.path}>{change.path}</span>
-                </div>
-              ))}
-            </div>
-          </>
-        ) : <div className="warning-note"><AlertIcon />{copy.noChangesToCommit}</div>}
-
-        <div className="push-safety-note">
-          <ShieldIcon />
-          <div><strong>{copy.allChangesIncludedTitle}</strong><span>{copy.allChangesIncludedLead}</span></div>
-        </div>
-
-        <label className="field commit-message-field">
-          <span>{copy.commitMessage}</span>
-          <input value={message} maxLength={200} placeholder={copy.commitMessagePlaceholder} onChange={(event) => setMessage(event.target.value)} disabled={Boolean(action)} autoFocus />
-          <small>{message.trim().length}/200</small>
-        </label>
-
-        {!preview.pushRemoteUrl && preview.pushUnavailableReason && (
-          <div className="warning-note"><AlertIcon /><div><strong>{copy.pushAfterCommitUnavailable}</strong><br />{localizeRuntimeMessage(preview.pushUnavailableReason, locale)}</div></div>
-        )}
-        {error && <div className="inline-error"><AlertIcon />{error}</div>}
-        <div className="modal-actions commit-actions">
-          <button className="button button--ghost" type="button" onClick={onClose} disabled={Boolean(action)}>{copy.cancel}</button>
-          <button className="button button--ghost" type="button" onClick={() => commit(false)} disabled={!hasChanges || !messageIsValid || Boolean(action)}>{action === "commit" ? copy.committing : copy.commitOnly}</button>
-          <button className="button button--primary" type="button" onClick={() => commit(true)} disabled={!hasChanges || !messageIsValid || !preview.pushRemoteUrl || Boolean(action)}>{action === "push" ? copy.committingAndPushing : copy.commitAndPush}</button>
-        </div>
-      </section>
-    </div>
-  );
-}
-
-type PullRequestStage = "branch" | "commit" | "push" | "pr";
-
-function PullRequestDialog({
-  preview,
-  locale,
-  onClose,
-  onRefresh,
-  onCreate,
-}: {
-  preview: PullRequestPreview;
-  locale: Locale;
-  onClose: () => void;
-  onRefresh: () => Promise<void>;
-  onCreate: (
-    input: { branchName: string; commitMessage: string; title: string; body: string; draft: boolean },
-    onProgress: (stage: PullRequestStage) => void,
-  ) => Promise<PullRequestResult>;
-}) {
-  const copy = uiCopy[locale];
-  const [branchName, setBranchName] = useState("");
-  const [commitMessage, setCommitMessage] = useState("");
-  const [title, setTitle] = useState("");
-  const [body, setBody] = useState("");
-  const [draft, setDraft] = useState(false);
-  const [stage, setStage] = useState<PullRequestStage | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<PullRequestResult | null>(null);
-  const [copied, setCopied] = useState(false);
-  const hasChanges = preview.changes.length > 0;
-  const hasProposal = hasChanges || preview.commitsAhead > 0;
-  const branchIsValid = !preview.requiresNewBranch || (branchName.trim().length > 0 && branchName.trim().length <= 200);
-  const commitMessageIsValid = !hasChanges || (commitMessage.trim().length > 0 && commitMessage.trim().length <= 200 && !/[\r\n]/.test(commitMessage));
-  const titleIsValid = title.trim().length > 0 && title.trim().length <= 256 && !/[\r\n]/.test(title);
-  const workingBranch = preview.requiresNewBranch ? branchName.trim() || "—" : preview.currentBranch;
-  const running = stage !== null;
-  const stages: Array<{ id: PullRequestStage; label: string; shown: boolean }> = [
-    { id: "branch", label: copy.prStepBranch, shown: preview.requiresNewBranch },
-    { id: "commit", label: copy.prStepCommit, shown: hasChanges },
-    { id: "push", label: copy.prStepPush, shown: preview.requiresNewBranch || hasChanges || !preview.branchPushed },
-    { id: "pr", label: copy.prStepCreate, shown: true },
-  ];
-  const visibleStages = stages.filter((item) => item.shown);
-
-  const submit = async () => {
-    setError(null);
-    setResult(null);
-    try {
-      const created = await onCreate({ branchName, commitMessage, title, body, draft }, setStage);
-      setResult(created);
-      setStage(null);
-    } catch (cause) {
-      setError(messageFrom(cause, locale));
-      setStage(null);
-      await onRefresh().catch(() => undefined);
-    }
-  };
-
-  const copyUrl = async () => {
-    if (!result) return;
-    await navigator.clipboard.writeText(result.url);
-    setCopied(true);
-  };
-
-  return (
-    <div className="modal-layer" role="presentation" onMouseDown={running ? undefined : onClose}>
-      <section className="modal pull-request-modal" role="dialog" aria-modal="true" aria-labelledby="pull-request-title" onMouseDown={(event) => event.stopPropagation()}>
-        <div className="modal-header">
-          <div>
-            <p className="eyebrow">GitHub</p>
-            <h2 id="pull-request-title">{copy.pullRequestDialogTitle}</h2>
-          </div>
-          <button className="icon-button" type="button" onClick={onClose} disabled={running} aria-label={copy.close}><CloseIcon /></button>
-        </div>
-
-        {result ? (
-          <div className="pull-request-result">
-            <span className="result-icon"><CheckIcon /></span>
-            <p className="eyebrow">{copy.pullRequestReady}</p>
-            <h3>{result.existing ? copy.pullRequestAlreadyExists(result.number) : copy.pullRequestCreated(result.number)}</h3>
-            <p>{result.branch} → {result.baseBranch}</p>
-            <code>{result.url}</code>
-            <div className="modal-actions">
-              <button className="button button--ghost" type="button" onClick={copyUrl}>{copied ? copy.copied : copy.copyPullRequestUrl}</button>
-              <button className="button button--primary" type="button" onClick={onClose}>{copy.close}</button>
-            </div>
-          </div>
-        ) : (
-          <>
-            <p className="modal-lead">{copy.pullRequestDialogLead}</p>
-            <div className="publish-destination">
-              <ProfileAvatar profile={preview.profile} />
-              <div><span>{copy.pullRequestRepository}</span><strong>{preview.repositoryNameWithOwner} · {preview.profile.label}</strong></div>
-            </div>
-
-            <dl className="push-details pull-request-route">
-              <div><dt>{copy.pullRequestBase}</dt><dd>{preview.baseBranch}</dd></div>
-              <div><dt>{copy.pullRequestHead}</dt><dd>{workingBranch}</dd></div>
-            </dl>
-
-            {preview.requiresNewBranch ? (
-              <>
-                <div className="privacy-note"><BranchIcon /><span>{copy.branchWillBeCreated(preview.baseBranch)}</span></div>
-                <label className="field pull-request-field">
-                  <span>{copy.newBranchName}</span>
-                  <input value={branchName} maxLength={200} placeholder={copy.branchNamePlaceholder} onChange={(event) => setBranchName(event.target.value)} disabled={running} autoFocus />
-                </label>
-              </>
-            ) : <div className="privacy-note"><BranchIcon /><span>{copy.existingWorkingBranch} {copy.commitsAhead(preview.commitsAhead)}</span></div>}
-
-            {hasChanges && (
-              <>
-                <p className="commit-change-heading">{copy.changesToCommit(preview.changes.length)}</p>
-                <div className="commit-change-list" aria-label={copy.changesToCommit(preview.changes.length)}>
-                  {preview.changes.map((change, index) => (
-                    <div className="commit-change-row" key={`${change.status}-${change.path}-${index}`}>
-                      <code>{change.status || "M"}</code><span title={change.path}>{change.path}</span>
-                    </div>
-                  ))}
-                </div>
-                <label className="field pull-request-field">
-                  <span>{copy.commitMessage}</span>
-                  <input value={commitMessage} maxLength={200} placeholder={copy.commitMessagePlaceholder} onChange={(event) => setCommitMessage(event.target.value)} disabled={running} />
-                </label>
-              </>
-            )}
-
-            {!hasProposal && <div className="warning-note"><AlertIcon />{copy.noPullRequestChanges}</div>}
-            {preview.existingPullRequest && <div className="warning-note"><AlertIcon />{copy.existingPullRequestFound(preview.existingPullRequest.number)}</div>}
-
-            <div className="pull-request-form-grid">
-              <label className="field">
-                <span>{copy.pullRequestTitle}</span>
-                <input value={title} maxLength={256} placeholder={copy.pullRequestTitlePlaceholder} onChange={(event) => setTitle(event.target.value)} disabled={running} />
-              </label>
-              <label className="field">
-                <span>{copy.pullRequestBody}</span>
-                <textarea value={body} maxLength={65536} rows={4} placeholder={copy.pullRequestBodyPlaceholder} onChange={(event) => setBody(event.target.value)} disabled={running} />
-              </label>
-              <label className="draft-option"><input type="checkbox" checked={draft} onChange={(event) => setDraft(event.target.checked)} disabled={running} />{copy.createAsDraft}</label>
-            </div>
-
-            <ol className="pull-request-steps">
-              {visibleStages.map((item) => <li className={stage === item.id ? "active" : ""} key={item.id}>{item.label}</li>)}
-            </ol>
-            {error && <div className="inline-error"><AlertIcon />{error}</div>}
-            <div className="modal-actions">
-              <button className="button button--ghost" type="button" onClick={onClose} disabled={running}>{copy.cancel}</button>
-              <button className="button button--primary" type="button" onClick={submit} disabled={!hasProposal || !branchIsValid || !commitMessageIsValid || !titleIsValid || running}>
-                {running ? copy.creatingPullRequest : preview.requiresNewBranch ? copy.createPullRequestAction : hasChanges ? copy.continuePullRequestAction : copy.openPullRequestAction}
-              </button>
-            </div>
-          </>
-        )}
-      </section>
-    </div>
-  );
-}
-
 function CloneDialog({
   profiles,
   locale,
@@ -1030,184 +532,6 @@ function CloneDialog({
   );
 }
 
-const pullRequestBlockReason = (pullRequest: ManagedPullRequest, copy: (typeof uiCopy)[Locale]) => {
-  if (pullRequest.isDraft) return copy.draftCannotMerge;
-  if (pullRequest.reviewDecision === "CHANGES_REQUESTED") return copy.changesRequestedCannotMerge;
-  if (pullRequest.checks.some((check) => check.bucket === "fail" || check.bucket === "cancel")) return copy.ciFailedCannotMerge;
-  if (pullRequest.checks.some((check) => check.bucket === "pending")) return copy.ciPendingCannotMerge;
-  if (pullRequest.mergeable === "CONFLICTING") return copy.conflictCannotMerge;
-  if (pullRequest.mergeable !== "MERGEABLE" || pullRequest.mergeStateStatus !== "CLEAN") return copy.policyCannotMerge;
-  return null;
-};
-
-function PullRequestManagementDialog({
-  management,
-  locale,
-  onClose,
-  onRefresh,
-  onMerge,
-}: {
-  management: PullRequestManagement;
-  locale: Locale;
-  onClose: () => void;
-  onRefresh: () => Promise<PullRequestManagement>;
-  onMerge: (pullRequest: ManagedPullRequest, strategy: MergeStrategy) => Promise<MergePullRequestResult>;
-}) {
-  const copy = uiCopy[locale];
-  const [selectedNumber, setSelectedNumber] = useState<number | null>(management.pullRequests[0]?.number ?? null);
-  const [strategy, setStrategy] = useState<MergeStrategy>("squash");
-  const [confirmed, setConfirmed] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
-  const [merging, setMerging] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<MergePullRequestResult | null>(null);
-
-  const selected = management.pullRequests.find((item) => item.number === selectedNumber) ?? management.pullRequests[0] ?? null;
-  const blockedBy = selected ? pullRequestBlockReason(selected, copy) : null;
-
-  useEffect(() => {
-    if (selectedNumber !== null && !management.pullRequests.some((item) => item.number === selectedNumber)) {
-      setSelectedNumber(management.pullRequests[0]?.number ?? null);
-      setConfirmed(false);
-    }
-  }, [management.pullRequests, selectedNumber]);
-
-  const refresh = async () => {
-    setRefreshing(true);
-    setError(null);
-    try {
-      await onRefresh();
-    } catch (nextError) {
-      setError(messageFrom(nextError, locale));
-    } finally {
-      setRefreshing(false);
-    }
-  };
-
-  const merge = async () => {
-    if (!selected || blockedBy || !confirmed) return;
-    setMerging(true);
-    setError(null);
-    try {
-      setResult(await onMerge(selected, strategy));
-    } catch (nextError) {
-      setError(messageFrom(nextError, locale));
-      setConfirmed(false);
-    } finally {
-      setMerging(false);
-    }
-  };
-
-  const checkLabel = (bucket: ManagedPullRequest["checks"][number]["bucket"]) => ({
-    pass: copy.checkPassed,
-    pending: copy.checkPending,
-    fail: copy.checkFailed,
-    skipping: copy.checkSkipped,
-    cancel: copy.checkCancelled,
-  })[bucket];
-
-  return (
-    <div className="modal-layer" onMouseDown={onClose}>
-      <section className="modal pr-management-modal" role="dialog" aria-modal="true" aria-labelledby="pr-management-title" onMouseDown={(event) => event.stopPropagation()}>
-        <div className="modal-header">
-          <div><p className="eyebrow">GitHub</p><h2 id="pr-management-title">{copy.prManagementTitle}</h2></div>
-          <button className="icon-button" onClick={onClose} aria-label={copy.close}><CloseIcon /></button>
-        </div>
-        <p className="modal-lead">{copy.prManagementLead}</p>
-
-        {result ? (
-          <div className="pull-request-result">
-            <span className="result-icon"><CheckIcon /></span>
-            <h3>{copy.mergedPullRequest(result.number)}</h3>
-            <p>{result.title}</p>
-            <code>{result.url}</code>
-            <div className="modal-actions">
-              <button className="button" type="button" onClick={onClose}>{copy.close}</button>
-              <a className="button button--primary" href={result.url} target="_blank" rel="noreferrer">{copy.viewOnGithub}</a>
-            </div>
-          </div>
-        ) : (
-          <>
-            <div className="pr-management-toolbar">
-              <div><strong>{management.repositoryNameWithOwner}</strong><span>{copy.openPullRequests(management.pullRequests.length)}</span></div>
-              <button className="button button--ghost" type="button" disabled={refreshing || merging} onClick={refresh}>{refreshing ? copy.refreshingPullRequests : copy.refreshPullRequests}</button>
-            </div>
-
-            {!management.pullRequests.length ? (
-              <div className="pr-empty"><CheckIcon /><strong>{copy.noOpenPullRequests}</strong></div>
-            ) : (
-              <div className="pr-management-layout">
-                <div className="pr-list">
-                  {management.pullRequests.map((pullRequest) => {
-                    const failed = pullRequest.checks.filter((check) => check.bucket === "fail" || check.bucket === "cancel").length;
-                    const pending = pullRequest.checks.filter((check) => check.bucket === "pending").length;
-                    const passed = pullRequest.checks.filter((check) => check.bucket === "pass" || check.bucket === "skipping").length;
-                    return (
-                      <button
-                        type="button"
-                        className={`pr-list-item ${selected?.number === pullRequest.number ? "selected" : ""}`}
-                        aria-pressed={selected?.number === pullRequest.number}
-                        key={pullRequest.number}
-                        onClick={() => { setSelectedNumber(pullRequest.number); setConfirmed(false); setError(null); }}
-                      >
-                        <span className="pr-list-number">#{pullRequest.number}{pullRequest.isDraft && <em>{copy.draftBadge}</em>}</span>
-                        <strong>{pullRequest.title}</strong>
-                        <small>{pullRequest.headBranch} → {pullRequest.baseBranch}</small>
-                        <span className={`pr-ci-summary ${failed ? "failed" : pending ? "pending" : "passed"}`}>
-                          {failed ? copy.ciFailed(failed) : pending ? copy.ciPending(pending) : pullRequest.checks.length ? copy.ciPassed(passed) : copy.ciNotConfigured}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {selected ? (
-                  <div className="pr-detail">
-                    <div className="pr-detail-heading">
-                      <div><span>{copy.pullRequestNumber(selected.number)}</span><h3>{selected.title}</h3></div>
-                      <a href={selected.url} target="_blank" rel="noreferrer">{copy.viewOnGithub}</a>
-                    </div>
-                    <p className="pr-route"><code>{selected.headBranch}</code><span>→</span><code>{selected.baseBranch}</code></p>
-                    <div className="pr-detail-meta">
-                      <span>{selected.author ? copy.pullRequestAuthor(selected.author) : "GitHub"}</span>
-                      <span>{selected.reviewDecision === "APPROVED" ? copy.reviewApproved : selected.reviewDecision === "CHANGES_REQUESTED" ? copy.reviewChangesRequested : copy.reviewNotRequired}</span>
-                    </div>
-
-                    <h4>{copy.checksHeading}</h4>
-                    {selected.checks.length ? (
-                      <div className="pr-checks">
-                        {selected.checks.map((check, index) => (
-                          <div className={`pr-check is-${check.bucket}`} key={`${check.name}-${index}`}>
-                            <span>{check.bucket === "pass" || check.bucket === "skipping" ? <CheckIcon /> : <AlertIcon />}</span>
-                            <div><strong>{check.name}</strong><small>{check.workflow || check.state}</small></div>
-                            {check.link ? <a href={check.link} target="_blank" rel="noreferrer">{checkLabel(check.bucket)}</a> : <em>{checkLabel(check.bucket)}</em>}
-                          </div>
-                        ))}
-                      </div>
-                    ) : <div className="pr-no-checks">{copy.ciNotConfigured}</div>}
-
-                    <div className={`merge-assessment ${blockedBy ? "blocked" : "ready"}`}>
-                      {blockedBy ? <AlertIcon /> : <CheckIcon />}
-                      <div><strong>{blockedBy || copy.readyToMerge}</strong>{!blockedBy && <span>{copy.readyToMergeLead}</span>}</div>
-                    </div>
-
-                    <div className="pr-merge-controls">
-                      <label className="field"><span>{copy.mergeStrategy}</span><select value={strategy} onChange={(event) => { setStrategy(event.currentTarget.value as MergeStrategy); setConfirmed(false); }}><option value="squash">{copy.strategySquash}</option><option value="merge">{copy.strategyMerge}</option><option value="rebase">{copy.strategyRebase}</option></select></label>
-                      <label className="draft-option merge-confirm"><input type="checkbox" checked={confirmed} disabled={Boolean(blockedBy) || merging} onChange={(event) => setConfirmed(event.currentTarget.checked)} />{copy.mergeConfirmation(selected.number)}</label>
-                      <button className="button button--danger button--wide" type="button" disabled={Boolean(blockedBy) || !confirmed || merging} onClick={merge}>{merging ? copy.mergingPullRequest : copy.mergePullRequest}</button>
-                    </div>
-                  </div>
-                ) : <div className="pr-empty">{copy.selectPullRequest}</div>}
-              </div>
-            )}
-            {error && <div className="inline-error"><AlertIcon />{error}</div>}
-          </>
-        )}
-      </section>
-    </div>
-  );
-}
-
 function App({ previewLocale }: { previewLocale?: Locale }) {
   const [locale, updateLocale] = useState<Locale>(() => previewLocale ?? resolveLocale(undefined, navigator.language));
   const copy = uiCopy[locale];
@@ -1217,18 +541,15 @@ function App({ previewLocale }: { previewLocale?: Locale }) {
   const [errorNotice, setErrorNotice] = useState<string | null>(null);
   const [environmentDismissed, setEnvironmentDismissed] = useState(false);
   const [statuses, setStatuses] = useState<Record<string, RepositoryStatus>>({});
+  const statusRefresh = useRef({ at: 0, running: false });
+  const [statusRefreshing, setStatusRefreshing] = useState(false);
+  const [statusesRefreshedAt, setStatusesRefreshedAt] = useState<Date | null>(null);
   const [page, setPage] = useState<ShellPage>("repositories");
   const [selectedRepositoryId, setSelectedRepositoryId] = useState<string | null>(null);
   const [pendingProfileId, setPendingProfileId] = useState("");
   const [editingProfile, setEditingProfile] = useState<EditingProfile | null>(null);
   const [cloneOpen, setCloneOpen] = useState(false);
   const [preview, setPreview] = useState<ApplyPreview | null>(null);
-  const [publishTarget, setPublishTarget] = useState<{ repository: RepositoryRecord; profile: Profile } | null>(null);
-  const [pushPreview, setPushPreview] = useState<PushPreview | null>(null);
-  const [syncPreview, setSyncPreview] = useState<SyncPreview | null>(null);
-  const [commitPreview, setCommitPreview] = useState<CommitPreview | null>(null);
-  const [pullRequestPreview, setPullRequestPreview] = useState<PullRequestPreview | null>(null);
-  const [pullRequestManagement, setPullRequestManagement] = useState<PullRequestManagement | null>(null);
   const [busy, setBusy] = useState(false);
   const [removeConfirmingId, setRemoveConfirmingId] = useState<string | null>(null);
 
@@ -1265,18 +586,43 @@ function App({ previewLocale }: { previewLocale?: Locale }) {
   const data = result?.data;
   const environment = result?.environment;
   const selectedRepository = data?.repositories.find((repo) => repo.id === selectedRepositoryId) ?? null;
-  const assignedProfile = data?.profiles.find((profile) => profile.id === selectedRepository?.profileId) ?? null;
   const pendingProfile = data?.profiles.find((profile) => profile.id === pendingProfileId) ?? null;
 
   const refreshStatuses = () => {
+    if (statusRefresh.current.running) return;
+    statusRefresh.current = { at: Date.now(), running: true };
+    setStatusRefreshing(true);
     inspectRepositoryStatuses()
-      .then((items) => setStatuses(Object.fromEntries(items.map((item) => [item.repositoryId, item]))))
-      .catch((error) => setErrorNotice(`${messageFrom(error, locale)} ${shellCopy[locale].refresh}`));
+      .then((items) => {
+        setStatuses(Object.fromEntries(items.map((item) => [item.repositoryId, item])));
+        setStatusesRefreshedAt(new Date());
+      })
+      .catch((error) => setErrorNotice(`${messageFrom(error, locale)} ${shellCopy[locale].refresh}`))
+      .finally(() => {
+        statusRefresh.current.running = false;
+        setStatusRefreshing(false);
+      });
   };
 
   useEffect(() => {
     if (data) refreshStatuses();
   }, [data]);
+
+  // Commits or pushes made outside GitContext show up when the user comes back to the window.
+  useEffect(() => {
+    if (!data) return;
+    const onReturn = () => {
+      if (document.visibilityState !== "visible") return;
+      const { at, running } = statusRefresh.current;
+      if (shouldRefreshOnFocus(at, Date.now(), running)) refreshStatuses();
+    };
+    window.addEventListener("focus", onReturn);
+    document.addEventListener("visibilitychange", onReturn);
+    return () => {
+      window.removeEventListener("focus", onReturn);
+      document.removeEventListener("visibilitychange", onReturn);
+    };
+  }, [data, locale]);
 
   const updateData = (nextData: AppData) => setResult((current) => current ? { ...current, data: nextData } : current);
 
@@ -1359,13 +705,6 @@ function App({ previewLocale }: { previewLocale?: Locale }) {
     setNotice(copy.profileApplied(preview.profile.label, preview.repository.name));
   };
 
-  const publishRepositoryAction = async (options: PublishOptions) => {
-    const published = await publishRepository(options);
-    updateData(published.data);
-    setPublishTarget(null);
-    setNotice(copy.repositoryPublished(published.repositoryUrl));
-  };
-
   const cloneRepositoryAction = async (options: CloneOptions) => {
     const cloned = await cloneGithubRepository(options);
     const profile = cloned.data.profiles.find((item) => item.id === options.profileId);
@@ -1374,192 +713,6 @@ function App({ previewLocale }: { previewLocale?: Locale }) {
     setSelectedRepositoryId(cloned.repository.id);
     setPendingProfileId(options.profileId);
     setNotice(copy.repositoryCloned(cloned.repository.name, profile?.label ?? "Profile"));
-  };
-
-  const reviewPush = async () => {
-    if (!selectedRepository || !assignedProfile) return;
-    setNotice(null);
-    setErrorNotice(null);
-    setBusy(true);
-    try {
-      setPushPreview(await previewPush(selectedRepository.id, assignedProfile.id));
-    } catch (error) {
-      setErrorNotice(messageFrom(error, locale));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const pushRepositoryAction = async () => {
-    if (!pushPreview) return;
-    const result = await pushRepository(pushPreview.repository.id, pushPreview.profile.id);
-    setPushPreview(null);
-    setNotice(copy.pushCompleted(result.branch));
-  };
-
-  const storeSyncPreview = (nextPreview: SyncPreview) => {
-    setSyncPreview(nextPreview);
-    setResult((current) => current ? {
-      ...current,
-      data: {
-        ...current.data,
-        repositories: current.data.repositories.map((repository) => repository.id === nextPreview.repository.id
-          ? { ...repository, branch: nextPreview.branch, remoteUrl: nextPreview.remoteUrl }
-          : repository),
-      },
-    } : current);
-    return nextPreview;
-  };
-
-  const reviewSync = async () => {
-    if (!selectedRepository || !assignedProfile) return;
-    setNotice(null);
-    setErrorNotice(null);
-    setBusy(true);
-    try {
-      storeSyncPreview(await previewRepositorySync(selectedRepository.id, assignedProfile.id));
-    } catch (error) {
-      setErrorNotice(messageFrom(error, locale));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const refreshSync = async () => {
-    if (!syncPreview) throw new Error(copy.somethingWentWrong);
-    return storeSyncPreview(await previewRepositorySync(syncPreview.repository.id, syncPreview.profile.id));
-  };
-
-  const pullSync = async () => {
-    if (!syncPreview) throw new Error(copy.somethingWentWrong);
-    const refreshed = storeSyncPreview(await pullRepository(syncPreview.repository.id, syncPreview.profile.id));
-    setNotice(copy.pullCompleted(refreshed.branch));
-    return refreshed;
-  };
-
-  const pushSync = async () => {
-    if (!syncPreview) throw new Error(copy.somethingWentWrong);
-    const result = await pushRepository(syncPreview.repository.id, syncPreview.profile.id);
-    const refreshed = storeSyncPreview(await previewRepositorySync(syncPreview.repository.id, syncPreview.profile.id));
-    setNotice(copy.pushCompleted(result.branch));
-    return refreshed;
-  };
-
-  const reviewCommit = async () => {
-    if (!selectedRepository || !assignedProfile) return;
-    setNotice(null);
-    setErrorNotice(null);
-    setBusy(true);
-    try {
-      setCommitPreview(await previewCommit(selectedRepository.id, assignedProfile.id));
-    } catch (error) {
-      setErrorNotice(messageFrom(error, locale));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const commitRepositoryAction = async (message: string, pushAfterCommit: boolean) => {
-    if (!commitPreview) return;
-    const result = await commitRepository(commitPreview.repository.id, commitPreview.profile.id, message);
-    if (pushAfterCommit) {
-      try {
-        await pushRepository(commitPreview.repository.id, commitPreview.profile.id);
-      } catch (error) {
-        throw new Error(copy.commitSucceededPushFailed(result.commitId, messageFrom(error, locale)));
-      }
-      setCommitPreview(null);
-      setNotice(copy.commitAndPushCompleted(result.commitId, result.branch));
-      return;
-    }
-    setCommitPreview(null);
-    setNotice(copy.commitCompleted(result.commitId, result.branch));
-  };
-
-  const reviewPullRequest = async () => {
-    if (!selectedRepository || !assignedProfile) return;
-    setNotice(null);
-    setErrorNotice(null);
-    setBusy(true);
-    try {
-      setPullRequestPreview(await previewPullRequest(selectedRepository.id, assignedProfile.id));
-    } catch (error) {
-      setErrorNotice(messageFrom(error, locale));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const refreshPullRequest = async () => {
-    if (!pullRequestPreview) return;
-    setPullRequestPreview(await previewPullRequest(pullRequestPreview.repository.id, pullRequestPreview.profile.id));
-  };
-
-  const createPullRequestAction = async (
-    input: { branchName: string; commitMessage: string; title: string; body: string; draft: boolean },
-    onProgress: (stage: PullRequestStage) => void,
-  ) => {
-    if (!pullRequestPreview) throw new Error(copy.somethingWentWrong);
-    const repositoryId = pullRequestPreview.repository.id;
-    const profileId = pullRequestPreview.profile.id;
-    if (pullRequestPreview.requiresNewBranch) {
-      onProgress("branch");
-      const created = await createBranch(repositoryId, profileId, input.branchName);
-      updateData(created.data);
-    }
-    if (pullRequestPreview.changes.length > 0) {
-      onProgress("commit");
-      await commitRepository(repositoryId, profileId, input.commitMessage);
-    }
-    if (pullRequestPreview.requiresNewBranch || pullRequestPreview.changes.length > 0 || !pullRequestPreview.branchPushed) {
-      onProgress("push");
-      await pushRepository(repositoryId, profileId);
-    }
-    onProgress("pr");
-    const created = await createPullRequest({
-      repositoryId,
-      profileId,
-      baseBranch: pullRequestPreview.baseBranch,
-      title: input.title,
-      body: input.body,
-      draft: input.draft,
-    });
-    setNotice(created.existing ? copy.pullRequestAlreadyExists(created.number) : copy.pullRequestCreated(created.number));
-    return created;
-  };
-
-  const reviewPullRequests = async () => {
-    if (!selectedRepository || !assignedProfile) return;
-    setNotice(null);
-    setErrorNotice(null);
-    setBusy(true);
-    try {
-      setPullRequestManagement(await listPullRequests(selectedRepository.id, assignedProfile.id));
-    } catch (error) {
-      setErrorNotice(messageFrom(error, locale));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const refreshPullRequests = async () => {
-    if (!pullRequestManagement) throw new Error(copy.somethingWentWrong);
-    const refreshed = await listPullRequests(pullRequestManagement.repository.id, pullRequestManagement.profile.id);
-    setPullRequestManagement(refreshed);
-    return refreshed;
-  };
-
-  const mergePullRequestAction = async (pullRequest: ManagedPullRequest, strategy: MergeStrategy) => {
-    if (!pullRequestManagement) throw new Error(copy.somethingWentWrong);
-    const merged = await mergePullRequest({
-      repositoryId: pullRequestManagement.repository.id,
-      profileId: pullRequestManagement.profile.id,
-      number: pullRequest.number,
-      strategy,
-      expectedHeadOid: pullRequest.headOid,
-    });
-    setNotice(copy.mergedPullRequest(merged.number));
-    return merged;
   };
 
   const removeSelected = async () => {
@@ -1602,20 +755,13 @@ function App({ previewLocale }: { previewLocale?: Locale }) {
         </article>)}</div>}
         {!data.profiles.length && !editingProfile && <p>{shellCopy[locale].noProfiles}</p>}
         {editingProfile && <ProfileEditor initial={editingProfile.profile} creating={editingProfile.creating} ghAvailable={environment.gh.available} locale={locale} onClose={() => setEditingProfile(null)} onSave={saveProfileAction} onAutoApprove={updateProfileAutoApprove} inline />}
-      </div> : selectedRepository ? <RepositoryDetail repository={selectedRepository} profiles={data.profiles} status={selectedStatus} pendingProfileId={pendingProfileId} preview={preview} locale={locale} busy={busy} removing={removeConfirmingId === selectedRepository.id}
+      </div> : selectedRepository ? <RepositoryDetail key={selectedRepository.id} repository={selectedRepository} profiles={data.profiles} status={selectedStatus} pendingProfileId={pendingProfileId} preview={preview} locale={locale} busy={busy} removing={removeConfirmingId === selectedRepository.id}
         onBack={() => { setSelectedRepositoryId(null); setPreview(null); setNotice(null); }} onPendingProfile={setPendingProfileId} onReview={reviewAssignment} onCancelReview={() => setPreview(null)} onApply={applyProfileAction} onAutoApprove={updateAutoApprove}
         onStartRemove={() => setRemoveConfirmingId(selectedRepository.id)} onCancelRemove={() => setRemoveConfirmingId(null)} onRemove={removeSelected}
-        onCommit={reviewCommit} onPush={reviewPush} onSync={reviewSync} onPullRequest={reviewPullRequest} onManagePullRequests={reviewPullRequests}
-        onPublish={() => assignedProfile && setPublishTarget({ repository: selectedRepository, profile: assignedProfile })} />
-        : <RepositoryList repositories={data.repositories} profiles={data.profiles} statuses={statuses} locale={locale} busy={busy} onOpen={selectRepository} onAdd={addRepo} onClone={() => setCloneOpen(true)} onRefresh={refreshStatuses} />}
+        onData={updateData} onFinished={refreshStatuses} />
+        : <RepositoryList repositories={data.repositories} profiles={data.profiles} statuses={statuses} locale={locale} busy={busy} refreshing={statusRefreshing} refreshedAt={statusesRefreshedAt} onOpen={selectRepository} onAdd={addRepo} onClone={() => setCloneOpen(true)} onRefresh={refreshStatuses} />}
 
       {cloneOpen && <CloneDialog profiles={data.profiles} locale={locale} onClose={() => setCloneOpen(false)} onClone={cloneRepositoryAction} />}
-      {publishTarget && <PublishDialog repository={publishTarget.repository} profile={publishTarget.profile} locale={locale} onClose={() => setPublishTarget(null)} onPublish={publishRepositoryAction} />}
-      {pushPreview && <PushDialog preview={pushPreview} locale={locale} onClose={() => setPushPreview(null)} onPush={pushRepositoryAction} />}
-      {syncPreview && <SyncDialog preview={syncPreview} locale={locale} onClose={() => setSyncPreview(null)} onRefresh={refreshSync} onPull={pullSync} onPush={pushSync} />}
-      {commitPreview && <CommitDialog preview={commitPreview} locale={locale} onClose={() => setCommitPreview(null)} onCommit={commitRepositoryAction} />}
-      {pullRequestPreview && <PullRequestDialog preview={pullRequestPreview} locale={locale} onClose={() => setPullRequestPreview(null)} onRefresh={refreshPullRequest} onCreate={createPullRequestAction} />}
-      {pullRequestManagement && <PullRequestManagementDialog management={pullRequestManagement} locale={locale} onClose={() => setPullRequestManagement(null)} onRefresh={refreshPullRequests} onMerge={mergePullRequestAction} />}
     </Shell>
   );
 }

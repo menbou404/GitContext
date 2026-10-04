@@ -52,6 +52,24 @@ pub fn tracking_branch(repository_path: &str) -> Result<Option<String>, String> 
     ))
 }
 
+/// Commits waiting for push compared with the locally stored upstream ref.
+/// No fetch is performed; a missing upstream is unknown rather than zero.
+pub fn commits_ahead_of_upstream(repository_path: &str) -> Result<Option<u64>, String> {
+    let root = repository_root(repository_path)?;
+    if git_optional(&root, &["rev-parse", "--verify", "@{upstream}"]).is_none() {
+        return Ok(None);
+    }
+    let count = output_text(&run_git(
+        &root,
+        &["rev-list", "--count", "@{upstream}..HEAD"],
+    )?)?;
+    count
+        .trim()
+        .parse::<u64>()
+        .map(Some)
+        .map_err(|_| "Git returned an invalid ahead count.".to_string())
+}
+
 pub fn exact_changes(repository_path: &str) -> Result<Vec<ExactChange>, String> {
     let root = repository_root(repository_path)?;
     let output = run_git(
@@ -961,10 +979,10 @@ mod tests {
 
     use super::{
         apply_profile, build_commit_preview, build_preview, commit_all_changes,
-        commit_exact_changes, create_working_branch, exact_changes, is_gitcontext_ssh_command,
-        parse_ahead_behind, parse_working_tree_changes, read_local_config, rollback_local_config,
-        run_git, unset_local_config, validate_commit_message, validate_github_ssh_remote,
-        write_local_config,
+        commit_exact_changes, commits_ahead_of_upstream, create_working_branch, exact_changes,
+        is_gitcontext_ssh_command, parse_ahead_behind, parse_working_tree_changes,
+        read_local_config, rollback_local_config, run_git, unset_local_config,
+        validate_commit_message, validate_github_ssh_remote, write_local_config,
     };
     use crate::models::{ConfigChange, Profile, RepositoryRecord};
 
@@ -1010,6 +1028,75 @@ mod tests {
             .status
             .success());
         (root, repository, profile)
+    }
+
+    #[test]
+    fn ahead_uses_local_upstream_and_reports_missing_upstream() {
+        let (root, repository, _) = committed_test_repository();
+        let bare = root.with_extension("bare.git");
+        fs::create_dir_all(&bare).unwrap();
+        super::output_text(&run_git(&bare, &["init", "--bare"]).unwrap()).unwrap();
+        assert_eq!(commits_ahead_of_upstream(&repository.path).unwrap(), None);
+        assert!(
+            run_git(&root, &["remote", "add", "origin", &bare.to_string_lossy()])
+                .unwrap()
+                .status
+                .success()
+        );
+        let branch = super::branch_name(&repository.path).unwrap();
+        let head = super::output_text(&run_git(&root, &["rev-parse", "HEAD"]).unwrap()).unwrap();
+        for directory in fs::read_dir(root.join(".git").join("objects")).unwrap() {
+            let directory = directory.unwrap();
+            if !directory.file_type().unwrap().is_dir()
+                || directory.file_name() == "info"
+                || directory.file_name() == "pack"
+            {
+                continue;
+            }
+            let target = bare.join("objects").join(directory.file_name());
+            fs::create_dir_all(&target).unwrap();
+            for object in fs::read_dir(directory.path()).unwrap() {
+                let object = object.unwrap();
+                fs::copy(object.path(), target.join(object.file_name())).unwrap();
+            }
+        }
+        super::output_text(
+            &run_git(
+                &bare,
+                &["update-ref", &format!("refs/heads/{branch}"), &head],
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let tracking = format!("refs/remotes/origin/{branch}");
+        super::output_text(&run_git(&root, &["update-ref", &tracking, &head]).unwrap()).unwrap();
+        super::output_text(
+            &run_git(
+                &root,
+                &["branch", "--set-upstream-to", &format!("origin/{branch}")],
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            commits_ahead_of_upstream(&repository.path).unwrap(),
+            Some(0)
+        );
+        fs::write(root.join("next.txt"), "next").unwrap();
+        assert!(run_git(&root, &["add", "next.txt"])
+            .unwrap()
+            .status
+            .success());
+        assert!(run_git(&root, &["commit", "-m", "Next"])
+            .unwrap()
+            .status
+            .success());
+        assert_eq!(
+            commits_ahead_of_upstream(&repository.path).unwrap(),
+            Some(1)
+        );
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(bare).unwrap();
     }
 
     #[test]

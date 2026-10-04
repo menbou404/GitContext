@@ -90,6 +90,16 @@ export const demoBootstrap: BootstrapResult = {
         autoApprove: { pushWorkBranch: false, pushDefaultBranch: false, createPullRequest: false, mergePullRequest: false, publishRepository: false },
       },
       {
+        id: "repo-local",
+        name: "local-sandbox",
+        path: "C:\\Users\\you\\Projects\\local-sandbox",
+        remoteUrl: null,
+        branch: "main",
+        profileId: "open-source",
+        lastAppliedAt: "2026-08-26T00:20:00Z",
+        autoApprove: { pushWorkBranch: false, pushDefaultBranch: false, createPullRequest: false, mergePullRequest: false, publishRepository: false },
+      },
+      {
         id: "repo-unassigned",
         name: "new-research",
         path: "C:\\Users\\you\\Projects\\new-research",
