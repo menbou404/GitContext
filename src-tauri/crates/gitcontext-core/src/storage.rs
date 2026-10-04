@@ -487,6 +487,63 @@ mod tests {
     }
 
     #[test]
+    fn locale_survives_legacy_state_and_other_saves() {
+        let store = temporary_store();
+        fs::create_dir_all(store.config_dir()).unwrap();
+        fs::write(
+            store.state_path(),
+            r#"{"version":2,"profiles":[],"repositories":[]}"#,
+        )
+        .unwrap();
+        assert!(store.load().unwrap().settings.locale.is_none());
+
+        let settings = crate::operations::set_locale(&store, "ja".into()).unwrap();
+        assert_eq!(settings.locale.as_deref(), Some("ja"));
+        assert_eq!(store.load().unwrap().settings.locale.as_deref(), Some("ja"));
+
+        crate::operations::save_profile(
+            &store,
+            crate::models::Profile {
+                id: "test-profile".into(),
+                label: "Test".into(),
+                accent: "#112233".into(),
+                git_name: "Example".into(),
+                git_email: "test@example.com".into(),
+                github_username: None,
+                ssh_key_path: None,
+                gh_config_dir: None,
+                auto_approve: crate::models::ProfileAutoApprove::default(),
+            },
+        )
+        .unwrap();
+        let data = store.load().unwrap();
+        assert_eq!(data.settings.locale.as_deref(), Some("ja"));
+        assert_eq!(data.profiles.len(), 1);
+        assert_eq!(
+            crate::operations::set_locale(&store, "fr".into())
+                .unwrap()
+                .locale
+                .as_deref(),
+            Some("ja")
+        );
+        assert_eq!(store.load().unwrap().settings.locale.as_deref(), Some("ja"));
+    }
+
+    #[test]
+    fn invalid_saved_locales_are_ignored() {
+        let store = temporary_store();
+        fs::create_dir_all(store.config_dir()).unwrap();
+        for value in [r#""fr""#, "null", "12", "true"] {
+            fs::write(
+                store.state_path(),
+                format!(r#"{{"version":2,"profiles":[],"repositories":[],"settings":{{"locale":{value}}}}}"#),
+            )
+            .unwrap();
+            assert!(store.load().unwrap().settings.locale.is_none());
+        }
+    }
+
+    #[test]
     fn config_dir_selects_debug_sibling_and_rejects_relative_override() {
         let release = std::env::temp_dir()
             .join("gitcontext-config-test")

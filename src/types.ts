@@ -25,6 +25,19 @@ export interface RepositoryRecord {
   autoApprove: AutoApprove;
 }
 
+export type RepositoryState = "ready" | "reapply" | "unassigned" | "attention";
+
+export interface RepositoryStatus {
+  repositoryId: string;
+  state: RepositoryState;
+  branch?: string | null;
+  uncommittedChanges?: number | null;
+  identityInSync: boolean;
+  mismatchedKeys: string[];
+  github?: GhProfileStatus | null;
+  error?: string | null;
+}
+
 export interface AutoApprove {
   pushWorkBranch: boolean;
   pushDefaultBranch: boolean;
@@ -37,6 +50,11 @@ export interface AppData {
   version: number;
   profiles: Profile[];
   repositories: RepositoryRecord[];
+  settings: AppSettings;
+}
+
+export interface AppSettings {
+  locale?: string | null;
 }
 
 export interface ToolStatus {

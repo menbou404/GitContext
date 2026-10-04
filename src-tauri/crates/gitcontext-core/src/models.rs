@@ -64,6 +64,26 @@ pub struct AppData {
     pub version: u32,
     pub profiles: Vec<Profile>,
     pub repositories: Vec<RepositoryRecord>,
+    #[serde(default)]
+    pub settings: AppSettings,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppSettings {
+    #[serde(default, deserialize_with = "deserialize_locale")]
+    pub locale: Option<String>,
+}
+
+fn deserialize_locale<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(value
+        .as_str()
+        .filter(|locale| matches!(*locale, "ja" | "en"))
+        .map(str::to_owned))
 }
 
 #[cfg(test)]
@@ -108,6 +128,7 @@ impl Default for AppData {
             version: 2,
             profiles: Vec::new(),
             repositories: Vec::new(),
+            settings: AppSettings::default(),
         }
     }
 }
@@ -147,6 +168,28 @@ pub struct GhProfileStatus {
     pub username: Option<String>,
     pub detail: Option<String>,
     pub config_dir: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RepositoryState {
+    Ready,
+    Reapply,
+    Unassigned,
+    Attention,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryStatus {
+    pub repository_id: String,
+    pub state: RepositoryState,
+    pub branch: Option<String>,
+    pub uncommitted_changes: Option<usize>,
+    pub identity_in_sync: bool,
+    pub mismatched_keys: Vec<String>,
+    pub github: Option<GhProfileStatus>,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -505,6 +548,7 @@ mod tests {
                 valid_profile(),
             ],
             repositories: Vec::new(),
+            settings: AppSettings::default(),
         };
 
         assert!(migrate_app_data(&mut data));

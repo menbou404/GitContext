@@ -13,6 +13,7 @@ import {
   createBranch,
   createPullRequest,
   inspectGithubProfile,
+  inspectRepositoryStatuses,
   listenForGithubAuthPrompt,
   listGithubRepositories,
   listPullRequests,
@@ -28,6 +29,7 @@ import {
   pushRepository,
   removeRepository,
   saveProfile,
+  setLocale,
   setProfileAutoApprove,
   setRepositoryAutoApprove,
 } from "./backend";
@@ -35,22 +37,23 @@ import {
   AlertIcon,
   BranchIcon,
   CheckIcon,
-  ChevronIcon,
   CloseIcon,
-  EditIcon,
-  FolderIcon,
-  KeyIcon,
-  MoreIcon,
   PlusIcon,
   SearchIcon,
   ShieldIcon,
   TerminalIcon,
-  TrashIcon,
 } from "./Icons";
 import type { AppData, ApplyPreview, AutoApprove, BootstrapResult, CloneOptions, CommitPreview, GhProfileStatus, GithubAuthPrompt, GithubRepository, ManagedPullRequest, MergePullRequestResult, MergeStrategy, Profile, PublishOptions, PullRequestManagement, PullRequestPreview, PullRequestResult, PushPreview, RepositoryRecord, RepositoryVisibility, SyncPreview } from "./types";
-import { compactPath, initials, profileIsComplete } from "./types";
-import { localizeRuntimeMessage, uiCopy, type Locale } from "./i18n";
+import type { RepositoryStatus } from "./types";
+import { initials, profileIsComplete } from "./types";
+import { localizeRuntimeMessage, shellCopy, uiCopy, type Locale } from "./i18n";
+import { resolveLocale } from "./locale";
+import { Shell, type ShellPage } from "./ui/Shell";
+import { RepositoryList } from "./ui/RepositoryList";
+import { RepositoryDetail } from "./ui/RepositoryDetail";
+import { ProfileDot } from "./ui/ProfileDot";
 import "./App.css";
+import "./ui/ui.css";
 
 const accents = ["#d8a33f", "#56a7d9", "#d97866", "#8e78d4", "#5ca989"];
 
@@ -80,28 +83,6 @@ const messageFrom = (error: unknown, locale: Locale) => {
   return localizeRuntimeMessage(message, locale);
 };
 
-const formatAppliedAt = (value: string | null | undefined, locale: Locale) => {
-  const copy = uiCopy[locale];
-  if (!value) return copy.notApplied;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return copy.applied;
-  return new Intl.DateTimeFormat(locale === "ja" ? "ja-JP" : undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
-};
-
-function ToolBadge({ label, available }: { label: string; available: boolean }) {
-  return (
-    <span className={`tool-badge ${available ? "is-ready" : "is-missing"}`}>
-      <span className="status-dot" />
-      {label}
-    </span>
-  );
-}
-
 function ProfileAvatar({ profile, size = "normal" }: { profile: Profile; size?: "small" | "normal" | "large" }) {
   return (
     <span
@@ -122,6 +103,7 @@ function ProfileEditor({
   onClose,
   onSave,
   onAutoApprove,
+  inline = false,
 }: {
   initial: Profile;
   creating: boolean;
@@ -130,6 +112,7 @@ function ProfileEditor({
   onClose: () => void;
   onSave: (profile: Profile) => Promise<void>;
   onAutoApprove: (profileId: string, enabled: boolean) => Promise<void>;
+  inline?: boolean;
 }) {
   const copy = uiCopy[locale];
   const [draft, setDraft] = useState(initial);
@@ -268,8 +251,8 @@ function ProfileEditor({
   };
 
   return (
-    <div className="modal-layer" role="presentation" onMouseDown={onClose}>
-      <form className="modal profile-modal" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}>
+    <div className={inline ? "ui-inline-editor" : "modal-layer"} role={inline ? undefined : "presentation"} onMouseDown={inline ? undefined : onClose}>
+      <form className={`modal profile-modal ${inline ? "ui-inline-profile-modal" : ""}`} onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}>
         <div className="modal-header">
           <div>
             <p className="eyebrow">{copy.repositoryIdentity}</p>
@@ -379,67 +362,6 @@ function ProfileEditor({
           <button className="button button--primary" disabled={saving} type="submit">{saving ? copy.saving : copy.saveProfile}</button>
         </div>
       </form>
-    </div>
-  );
-}
-
-function ApplyDialog({
-  preview,
-  locale,
-  onClose,
-  onApply,
-}: {
-  preview: ApplyPreview;
-  locale: Locale;
-  onClose: () => void;
-  onApply: () => Promise<void>;
-}) {
-  const copy = uiCopy[locale];
-  const [applying, setApplying] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const apply = async () => {
-    setApplying(true);
-    setError(null);
-    try {
-      await onApply();
-    } catch (cause) {
-      setError(messageFrom(cause, locale));
-      setApplying(false);
-    }
-  };
-
-  return (
-    <div className="modal-layer" role="presentation" onMouseDown={onClose}>
-      <section className="modal apply-modal" role="dialog" aria-modal="true" aria-labelledby="apply-title" onMouseDown={(event) => event.stopPropagation()}>
-        <div className="modal-header">
-          <div>
-            <p className="eyebrow">{copy.reviewChanges}</p>
-            <h2 id="apply-title">{copy.applyQuestion(preview.profile.label, preview.repository.name)}</h2>
-          </div>
-          <button className="icon-button" type="button" onClick={onClose} aria-label={copy.close}><CloseIcon /></button>
-        </div>
-        <p className="modal-lead">{copy.applyLead}</p>
-
-        <div className="change-list">
-          {preview.changes.map((change) => (
-            <div className="change-row" key={change.key}>
-              <code>{change.key}</code>
-              <div className="change-values">
-                <span>{change.currentValue || copy.notSet}</span>
-                <ChevronIcon />
-                <strong>{change.nextValue ?? copy.removedValue}</strong>
-              </div>
-            </div>
-          ))}
-        </div>
-        {preview.warnings.map((warning) => <div className="warning-note" key={warning}><AlertIcon />{localizeRuntimeMessage(warning, locale)}</div>)}
-        {error && <div className="inline-error"><AlertIcon />{error}</div>}
-        <div className="modal-actions">
-          <button className="button button--ghost" type="button" onClick={onClose}>{copy.cancel}</button>
-          <button className="button button--primary" type="button" onClick={apply} disabled={applying}>{applying ? copy.applying : copy.applySafely}</button>
-        </div>
-      </section>
     </div>
   );
 }
@@ -1286,13 +1208,16 @@ function PullRequestManagementDialog({
   );
 }
 
-function App({ locale = "en" }: { locale?: Locale }) {
+function App({ previewLocale }: { previewLocale?: Locale }) {
+  const [locale, updateLocale] = useState<Locale>(() => previewLocale ?? resolveLocale(undefined, navigator.language));
   const copy = uiCopy[locale];
   const [result, setResult] = useState<BootstrapResult | null>(null);
   const [loadingError, setLoadingError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
-  const [profileFilter, setProfileFilter] = useState<string | null>(null);
+  const [errorNotice, setErrorNotice] = useState<string | null>(null);
+  const [environmentDismissed, setEnvironmentDismissed] = useState(false);
+  const [statuses, setStatuses] = useState<Record<string, RepositoryStatus>>({});
+  const [page, setPage] = useState<ShellPage>("repositories");
   const [selectedRepositoryId, setSelectedRepositoryId] = useState<string | null>(null);
   const [pendingProfileId, setPendingProfileId] = useState("");
   const [editingProfile, setEditingProfile] = useState<EditingProfile | null>(null);
@@ -1315,12 +1240,27 @@ function App({ locale = "en" }: { locale?: Locale }) {
   useEffect(() => {
     bootstrap()
       .then((value) => {
+        updateLocale(previewLocale ?? resolveLocale(value.data.settings?.locale, navigator.language));
         setResult(value);
-        setSelectedRepositoryId(value.data.repositories[0]?.id ?? null);
+        setSelectedRepositoryId(null);
         setPendingProfileId(value.data.repositories[0]?.profileId ?? value.data.profiles[0]?.id ?? "");
       })
       .catch((error) => setLoadingError(messageFrom(error, locale)));
-  }, [locale]);
+  }, [previewLocale]);
+
+  const changeLocale = async (nextLocale: Locale) => {
+    if (nextLocale === locale) return;
+    const previousLocale = locale;
+    updateLocale(nextLocale);
+    setNotice(null);
+    setErrorNotice(null);
+    try {
+      await setLocale(nextLocale);
+    } catch (error) {
+      updateLocale(previousLocale);
+      setErrorNotice(messageFrom(error, previousLocale));
+    }
+  };
 
   const data = result?.data;
   const environment = result?.environment;
@@ -1328,15 +1268,15 @@ function App({ locale = "en" }: { locale?: Locale }) {
   const assignedProfile = data?.profiles.find((profile) => profile.id === selectedRepository?.profileId) ?? null;
   const pendingProfile = data?.profiles.find((profile) => profile.id === pendingProfileId) ?? null;
 
-  const filteredRepositories = useMemo(() => {
-    if (!data) return [];
-    const term = query.trim().toLowerCase();
-    return data.repositories.filter((repo) => {
-      const matchesProfile = !profileFilter || repo.profileId === profileFilter;
-      const matchesQuery = !term || [repo.name, repo.path, repo.remoteUrl ?? ""].some((value) => value.toLowerCase().includes(term));
-      return matchesProfile && matchesQuery;
-    });
-  }, [data, profileFilter, query]);
+  const refreshStatuses = () => {
+    inspectRepositoryStatuses()
+      .then((items) => setStatuses(Object.fromEntries(items.map((item) => [item.repositoryId, item]))))
+      .catch((error) => setErrorNotice(`${messageFrom(error, locale)} ${shellCopy[locale].refresh}`));
+  };
+
+  useEffect(() => {
+    if (data) refreshStatuses();
+  }, [data]);
 
   const updateData = (nextData: AppData) => setResult((current) => current ? { ...current, data: nextData } : current);
 
@@ -1344,23 +1284,24 @@ function App({ locale = "en" }: { locale?: Locale }) {
     const repository = data?.repositories.find((repo) => repo.id === id);
     setSelectedRepositoryId(id);
     setRemoveConfirmingId(null);
+    setNotice(null);
     setPendingProfileId(repository?.profileId ?? data?.profiles[0]?.id ?? "");
   };
 
   const addRepo = async () => {
     setNotice(null);
+    setErrorNotice(null);
     try {
       const path = await chooseRepositoryDirectory(copy.selectRepositoryDialog);
       if (!path) return;
       setBusy(true);
       const repository = await addRepository(path);
       if (data) updateData({ ...data, repositories: [...data.repositories.filter((repo) => repo.id !== repository.id), repository] });
-      setProfileFilter(null);
       setSelectedRepositoryId(repository.id);
       setPendingProfileId(data?.profiles[0]?.id ?? "");
       setNotice(copy.repositoryAdded(repository.name));
     } catch (error) {
-      setNotice(messageFrom(error, locale));
+      setErrorNotice(messageFrom(error, locale));
     } finally {
       setBusy(false);
     }
@@ -1381,6 +1322,7 @@ function App({ locale = "en" }: { locale?: Locale }) {
     if (!selectedRepository || busy) return;
     setBusy(true);
     setNotice(null);
+    setErrorNotice(null);
     try {
       const nextData = await setRepositoryAutoApprove(selectedRepository.id, {
         ...selectedRepository.autoApprove,
@@ -1388,7 +1330,7 @@ function App({ locale = "en" }: { locale?: Locale }) {
       });
       updateData(nextData);
     } catch (error) {
-      setNotice(messageFrom(error, locale));
+      setErrorNotice(messageFrom(error, locale));
     } finally {
       setBusy(false);
     }
@@ -1397,11 +1339,12 @@ function App({ locale = "en" }: { locale?: Locale }) {
   const reviewAssignment = async () => {
     if (!selectedRepository || !pendingProfile) return;
     setNotice(null);
+    setErrorNotice(null);
     setBusy(true);
     try {
       setPreview(await previewAssignment(selectedRepository.id, pendingProfile.id));
     } catch (error) {
-      setNotice(messageFrom(error, locale));
+      setErrorNotice(messageFrom(error, locale));
     } finally {
       setBusy(false);
     }
@@ -1428,7 +1371,6 @@ function App({ locale = "en" }: { locale?: Locale }) {
     const profile = cloned.data.profiles.find((item) => item.id === options.profileId);
     updateData(cloned.data);
     setCloneOpen(false);
-    setProfileFilter(null);
     setSelectedRepositoryId(cloned.repository.id);
     setPendingProfileId(options.profileId);
     setNotice(copy.repositoryCloned(cloned.repository.name, profile?.label ?? "Profile"));
@@ -1437,11 +1379,12 @@ function App({ locale = "en" }: { locale?: Locale }) {
   const reviewPush = async () => {
     if (!selectedRepository || !assignedProfile) return;
     setNotice(null);
+    setErrorNotice(null);
     setBusy(true);
     try {
       setPushPreview(await previewPush(selectedRepository.id, assignedProfile.id));
     } catch (error) {
-      setNotice(messageFrom(error, locale));
+      setErrorNotice(messageFrom(error, locale));
     } finally {
       setBusy(false);
     }
@@ -1471,11 +1414,12 @@ function App({ locale = "en" }: { locale?: Locale }) {
   const reviewSync = async () => {
     if (!selectedRepository || !assignedProfile) return;
     setNotice(null);
+    setErrorNotice(null);
     setBusy(true);
     try {
       storeSyncPreview(await previewRepositorySync(selectedRepository.id, assignedProfile.id));
     } catch (error) {
-      setNotice(messageFrom(error, locale));
+      setErrorNotice(messageFrom(error, locale));
     } finally {
       setBusy(false);
     }
@@ -1504,11 +1448,12 @@ function App({ locale = "en" }: { locale?: Locale }) {
   const reviewCommit = async () => {
     if (!selectedRepository || !assignedProfile) return;
     setNotice(null);
+    setErrorNotice(null);
     setBusy(true);
     try {
       setCommitPreview(await previewCommit(selectedRepository.id, assignedProfile.id));
     } catch (error) {
-      setNotice(messageFrom(error, locale));
+      setErrorNotice(messageFrom(error, locale));
     } finally {
       setBusy(false);
     }
@@ -1534,11 +1479,12 @@ function App({ locale = "en" }: { locale?: Locale }) {
   const reviewPullRequest = async () => {
     if (!selectedRepository || !assignedProfile) return;
     setNotice(null);
+    setErrorNotice(null);
     setBusy(true);
     try {
       setPullRequestPreview(await previewPullRequest(selectedRepository.id, assignedProfile.id));
     } catch (error) {
-      setNotice(messageFrom(error, locale));
+      setErrorNotice(messageFrom(error, locale));
     } finally {
       setBusy(false);
     }
@@ -1585,11 +1531,12 @@ function App({ locale = "en" }: { locale?: Locale }) {
   const reviewPullRequests = async () => {
     if (!selectedRepository || !assignedProfile) return;
     setNotice(null);
+    setErrorNotice(null);
     setBusy(true);
     try {
       setPullRequestManagement(await listPullRequests(selectedRepository.id, assignedProfile.id));
     } catch (error) {
-      setNotice(messageFrom(error, locale));
+      setErrorNotice(messageFrom(error, locale));
     } finally {
       setBusy(false);
     }
@@ -1621,12 +1568,12 @@ function App({ locale = "en" }: { locale?: Locale }) {
       const nextData = await removeRepository(selectedRepository.id);
       updateData(nextData);
       const nextSelected = nextData.repositories[0] ?? null;
-      setSelectedRepositoryId(nextSelected?.id ?? null);
+      setSelectedRepositoryId(null);
       setPendingProfileId(nextSelected?.profileId ?? nextData.profiles[0]?.id ?? "");
       setNotice(copy.repositoryRemoved);
       setRemoveConfirmingId(null);
     } catch (error) {
-      setNotice(messageFrom(error, locale));
+      setErrorNotice(messageFrom(error, locale));
     }
   };
 
@@ -1638,207 +1585,38 @@ function App({ locale = "en" }: { locale?: Locale }) {
     return <main className="loading-state"><span className="brand-mark"><BranchIcon /></span><p>{copy.inspectingEnvironment}</p></main>;
   }
 
-  const assignedCount = data.repositories.filter((repo) => repo.profileId).length;
-  const readyProfileCount = data.profiles.filter(profileIsComplete).length;
+  const selectedStatus = selectedRepository ? statuses[selectedRepository.id] : undefined;
+  const missingTools = [!environment.git.available && "git", !environment.gh.available && "gh", !environment.ssh.available && "SSH"].filter(Boolean).join(" / ");
+  const visibleNotice = errorNotice || (missingTools && !environmentDismissed ? shellCopy[locale].envMissing(missingTools) : null);
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
-        <div className="brand">
-          <span className="brand-mark"><BranchIcon /></span>
-          <div><strong>GitContext</strong><small>{copy.identityManager}</small></div>
-        </div>
+    <Shell page={page} locale={locale} repositoryCount={data.repositories.length} notice={visibleNotice} noticeLink={!errorNotice && (!environment.gh.available || !environment.ssh.available) ? "profiles" : null} onDismiss={() => { if (errorNotice) setErrorNotice(null); else setEnvironmentDismissed(true); }} onNavigate={(nextPage) => { setPage(nextPage); setSelectedRepositoryId(null); setEditingProfile(null); setPreview(null); setNotice(null); }} onLocaleChange={changeLocale}>
+      {notice && <p className="ui-result" role="status">{notice}</p>}
+      {page === "profiles" ? <div className="ui-page">
+        <div className="ui-page-heading"><h1>{shellCopy[locale].profiles}</h1><div className="ui-heading-spacer" /><button className="ui-button ui-button--primary" type="button" onClick={() => setEditingProfile({ profile: emptyProfile(), creating: true })}><PlusIcon />{shellCopy[locale].addProfile}</button></div>
+        {!editingProfile && <div className="ui-profile-list">{data.profiles.map((profile) => <article className="ui-card" key={profile.id}>
+          <div className="ui-profile"><ProfileDot profile={profile} /><strong>{profile.label}</strong><small>{profile.githubUsername ? `@${profile.githubUsername}` : copy.githubNotLinked}</small></div>
+          <span className="ui-muted">{!profileIsComplete(profile) ? copy.needsSetup : data.repositories.some((repo) => repo.profileId === profile.id && statuses[repo.id]?.github?.authenticated && statuses[repo.id]?.github?.username?.toLowerCase() === profile.githubUsername?.toLowerCase()) ? copy.githubLinked : profile.githubUsername ? shellCopy[locale].notConnected : copy.gitOnly}</span>
+          <span className="ui-muted">{shellCopy[locale].assignedCount(data.repositories.filter((repo) => repo.profileId === profile.id).length)}</span>
+          <button className="ui-button" type="button" onClick={() => setEditingProfile({ profile, creating: false })}>{shellCopy[locale].editProfile}</button>
+        </article>)}</div>}
+        {!data.profiles.length && !editingProfile && <p>{shellCopy[locale].noProfiles}</p>}
+        {editingProfile && <ProfileEditor initial={editingProfile.profile} creating={editingProfile.creating} ghAvailable={environment.gh.available} locale={locale} onClose={() => setEditingProfile(null)} onSave={saveProfileAction} onAutoApprove={updateProfileAutoApprove} inline />}
+      </div> : selectedRepository ? <RepositoryDetail repository={selectedRepository} profiles={data.profiles} status={selectedStatus} pendingProfileId={pendingProfileId} preview={preview} locale={locale} busy={busy} removing={removeConfirmingId === selectedRepository.id}
+        onBack={() => { setSelectedRepositoryId(null); setPreview(null); setNotice(null); }} onPendingProfile={setPendingProfileId} onReview={reviewAssignment} onCancelReview={() => setPreview(null)} onApply={applyProfileAction} onAutoApprove={updateAutoApprove}
+        onStartRemove={() => setRemoveConfirmingId(selectedRepository.id)} onCancelRemove={() => setRemoveConfirmingId(null)} onRemove={removeSelected}
+        onCommit={reviewCommit} onPush={reviewPush} onSync={reviewSync} onPullRequest={reviewPullRequest} onManagePullRequests={reviewPullRequests}
+        onPublish={() => assignedProfile && setPublishTarget({ repository: selectedRepository, profile: assignedProfile })} />
+        : <RepositoryList repositories={data.repositories} profiles={data.profiles} statuses={statuses} locale={locale} busy={busy} onOpen={selectRepository} onAdd={addRepo} onClone={() => setCloneOpen(true)} onRefresh={refreshStatuses} />}
 
-        <nav className="side-nav" aria-label={copy.mainNavigation}>
-          <button className="active"><FolderIcon />{copy.repositories}<span>{data.repositories.length}</span></button>
-          <button><ShieldIcon />{copy.safetyLog}<span className="soon">{copy.soon}</span></button>
-        </nav>
-
-        <div className="profiles-heading">
-          <span>{copy.profiles}</span>
-          <button className="icon-button icon-button--dark" onClick={() => setEditingProfile({ profile: emptyProfile(), creating: true })} aria-label={copy.addProfile}><PlusIcon /></button>
-        </div>
-        <div className="profile-list">
-          {data.profiles.map((profile) => {
-            const complete = profileIsComplete(profile);
-            const count = data.repositories.filter((repo) => repo.profileId === profile.id).length;
-            return (
-              <div className={`profile-card ${profileFilter === profile.id ? "selected" : ""}`} key={profile.id}>
-                <button className="profile-card-main" onClick={() => setProfileFilter(profileFilter === profile.id ? null : profile.id)}>
-                  <ProfileAvatar profile={profile} />
-                  <span className="profile-copy"><strong>{profile.label}</strong><small>{profile.githubUsername ? `@${profile.githubUsername}` : copy.githubNotLinked}</small></span>
-                  <span className="profile-count">{count}</span>
-                </button>
-                <div className="profile-card-foot">
-                  <span className={complete ? "ready" : "needs-setup"}>{complete ? <CheckIcon /> : <AlertIcon />}{complete ? (profile.githubUsername ? copy.githubLinked : copy.gitOnly) : copy.needsSetup}</span>
-                  <button onClick={() => setEditingProfile({ profile, creating: false })} aria-label={copy.editProfileLabel(profile.label)}><EditIcon /></button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-        {!data.profiles.length && (
-          <div className="profile-empty-card">
-            <strong>{copy.noProfilesTitle}</strong>
-            <p>{copy.noProfilesLead}</p>
-            <button className="button" onClick={() => setEditingProfile({ profile: emptyProfile(), creating: true })}><PlusIcon />{copy.createFirstProfile}</button>
-          </div>
-        )}
-
-        <div className="sidebar-security">
-          <ShieldIcon />
-          <div><strong>{copy.secretsStayOutside}</strong><small>{copy.usesExistingSecrets}</small></div>
-        </div>
-      </aside>
-
-      <div className="workspace">
-        <header className="topbar">
-          <div><p className="breadcrumb">{copy.workspace} / <strong>{copy.repositories}</strong></p></div>
-          <div className="topbar-tools">
-            <ToolBadge label="Git" available={environment.git.available} />
-            <ToolBadge label="gh" available={environment.gh.available} />
-            <ToolBadge label="SSH" available={environment.ssh.available} />
-            <span className="topbar-divider" />
-            <span className="local-badge">{copy.localOnly}</span>
-            <a className="language-link" href={locale === "ja" ? "./index.html" : "./ja.html"} aria-label={copy.switchLanguageLabel}>{copy.switchLanguage}</a>
-          </div>
-        </header>
-
-        <main className="content">
-          {result.demoMode && <div className="demo-banner"><span>{copy.demoPreview}</span> {copy.demoNotice}</div>}
-          {result.developmentData && <div className="demo-banner"><span>{copy.developmentData}</span> {copy.developmentDataNotice} {result.storagePath}</div>}
-          {notice && <div className="notice"><CheckIcon /><span>{notice}</span><button onClick={() => setNotice(null)} aria-label={copy.dismiss}><CloseIcon /></button></div>}
-
-          <section className="hero-row">
-            <div>
-              <p className="eyebrow">{copy.repositoryIdentities}</p>
-              <h1>{copy.heroTitle}</h1>
-              <p>{copy.heroDescription}</p>
-            </div>
-            <div className="hero-actions">
-              <button className="button button--ghost button--add" onClick={() => setCloneOpen(true)} disabled={busy}><BranchIcon />{copy.cloneRepository}</button>
-              <button className="button button--primary button--add" onClick={addRepo} disabled={busy}><PlusIcon />{copy.addRepository}</button>
-            </div>
-          </section>
-
-          <section className="summary-grid" aria-label={copy.workspaceSummary}>
-            <article><span className="summary-icon summary-icon--green"><FolderIcon /></span><div><strong>{data.repositories.length}</strong><small>{copy.repositories}</small></div><em>{copy.assigned(assignedCount, data.repositories.length || 0)}</em></article>
-            <article><span className="summary-icon summary-icon--gold"><ShieldIcon /></span><div><strong>{readyProfileCount}</strong><small>{copy.readyProfiles}</small></div><em>{copy.total(data.profiles.length)}</em></article>
-            <article><span className={`summary-icon ${environment.gh.available ? "summary-icon--blue" : "summary-icon--muted"}`}><TerminalIcon /></span><div><strong>{environment.gh.available ? copy.ready : copy.missing}</strong><small>GitHub CLI</small></div><em>{environment.gh.available ? copy.authenticatedExternally : copy.optionalForMvp}</em></article>
-          </section>
-
-          <div className={`repository-layout ${selectedRepository ? "has-inspector" : ""}`}>
-            <section className="repository-panel">
-              <div className="panel-toolbar">
-                <div className="search-box"><SearchIcon /><input value={query} onChange={(event) => setQuery(event.currentTarget.value)} placeholder={copy.searchRepositories} /></div>
-                {profileFilter && <button className="filter-chip" onClick={() => setProfileFilter(null)}>{data.profiles.find((profile) => profile.id === profileFilter)?.label}<CloseIcon /></button>}
-                <span className="panel-count">{copy.shown(filteredRepositories.length)}</span>
-              </div>
-
-              {filteredRepositories.length ? (
-                <div className="repo-table">
-                  <div className="repo-table-head"><span>{copy.repository}</span><span>{copy.profile}</span><span>{copy.status}</span><span /></div>
-                  {filteredRepositories.map((repository) => {
-                    const profile = data.profiles.find((item) => item.id === repository.profileId);
-                    const selected = repository.id === selectedRepositoryId;
-                    return (
-                      <button className={`repo-row ${selected ? "selected" : ""}`} key={repository.id} onClick={() => selectRepository(repository.id)}>
-                        <span className="repo-main"><span className="repo-icon"><FolderIcon /></span><span><strong>{repository.name}</strong><small title={repository.path}>{compactPath(repository.path)}</small></span></span>
-                        <span>{profile ? <span className="profile-pill"><ProfileAvatar profile={profile} size="small" />{profile.label}</span> : <span className="unassigned-pill"><AlertIcon />{copy.unassigned}</span>}</span>
-                        <span className={repository.profileId ? "repo-status is-configured" : "repo-status"}><span className="status-dot" />{repository.profileId ? copy.configured : copy.actionNeeded}</span>
-                        <span className="repo-chevron"><ChevronIcon /></span>
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="empty-state"><span><FolderIcon /></span><h3>{copy.noRepositories}</h3><p>{data.repositories.length ? copy.noRepositoriesFiltered : copy.noRepositoriesYet}</p>{!data.repositories.length && <button className="button button--primary" onClick={addRepo}><PlusIcon />{copy.addRepository}</button>}</div>
-              )}
-            </section>
-
-            {selectedRepository && (
-              <aside className="inspector">
-                <div className="inspector-head">
-                  <div className="repo-icon repo-icon--large"><FolderIcon /></div>
-                  <div><p className="eyebrow">{copy.selectedRepository}</p><h2>{selectedRepository.name}</h2></div>
-                  <button className="icon-button" aria-label={copy.repositoryMenu}><MoreIcon /></button>
-                </div>
-                <p className="inspector-path" title={selectedRepository.path}>{selectedRepository.path}</p>
-                <div className="repo-meta">
-                  <span><BranchIcon />{selectedRepository.branch || copy.noBranch}</span>
-                  <span>{formatAppliedAt(selectedRepository.lastAppliedAt, locale)}</span>
-                </div>
-
-                <div className="inspector-section">
-                  <label htmlFor="profile-select">{copy.assignedProfile}</label>
-                  <div className="profile-select-wrap">
-                    {pendingProfile && <ProfileAvatar profile={pendingProfile} size="small" />}
-                    <select id="profile-select" value={pendingProfileId} onChange={(event) => setPendingProfileId(event.currentTarget.value)}>
-                      <option value="" disabled>{copy.selectProfile}</option>
-                      {data.profiles.map((profile) => <option value={profile.id} key={profile.id}>{profile.label}</option>)}
-                    </select>
-                  </div>
-                  {pendingProfile && !profileIsComplete(pendingProfile) && <div className="field-warning"><AlertIcon />{copy.completeProfile}</div>}
-                </div>
-
-                <div className="identity-card">
-                  <div className="identity-card-title"><span>{copy.effectiveIdentity}</span>{assignedProfile ? <span className="ready"><CheckIcon />{copy.applied}</span> : <span className="needs-setup"><AlertIcon />{copy.notSet}</span>}</div>
-                  <dl>
-                    <div><dt>{copy.commitAs}</dt><dd>{assignedProfile?.gitName || "—"}</dd></div>
-                    <div><dt>{copy.email}</dt><dd>{assignedProfile?.gitEmail || "—"}</dd></div>
-                    <div><dt>{copy.sshKey}</dt><dd title={assignedProfile?.sshKeyPath ?? undefined}><KeyIcon />{assignedProfile?.sshKeyPath ? compactPath(assignedProfile.sshKeyPath, 28) : copy.notManaged}</dd></div>
-                    <div><dt>GitHub CLI</dt><dd><TerminalIcon />{assignedProfile?.ghConfigDir ? copy.profileDirectory : copy.notManaged}</dd></div>
-                  </dl>
-                </div>
-
-                <div className="scope-note"><ShieldIcon /><div><strong>{copy.repositoryLocalChange}</strong><span>{copy.globalSettingsUntouched}</span></div></div>
-
-                <fieldset className="auto-approve-settings" disabled={busy}>
-                  <legend>{copy.autoApproveTitle}</legend>
-                  <label><input type="checkbox" checked={selectedRepository.autoApprove.pushWorkBranch} onChange={(event) => updateAutoApprove("pushWorkBranch", event.currentTarget.checked)} />{copy.autoApprovePush}</label>
-                  <label><input type="checkbox" checked={selectedRepository.autoApprove.pushDefaultBranch} onChange={(event) => updateAutoApprove("pushDefaultBranch", event.currentTarget.checked)} />{copy.autoApproveDefaultPush}<span className="auto-approve-risk">{copy.autoApproveDefaultPushRisk}</span></label>
-                  <label><input type="checkbox" checked={selectedRepository.autoApprove.createPullRequest} onChange={(event) => updateAutoApprove("createPullRequest", event.currentTarget.checked)} />{copy.autoApprovePullRequest}</label>
-                  <label><input type="checkbox" checked={selectedRepository.autoApprove.mergePullRequest} onChange={(event) => updateAutoApprove("mergePullRequest", event.currentTarget.checked)} />{copy.autoApproveMerge}<span className="auto-approve-risk">{copy.autoApproveMergeRisk}</span></label>
-                  <label><input type="checkbox" checked={selectedRepository.autoApprove.publishRepository} onChange={(event) => updateAutoApprove("publishRepository", event.currentTarget.checked)} />{copy.autoApprovePublish}<span className="auto-approve-risk">{copy.autoApprovePublishRisk}</span></label>
-                </fieldset>
-
-                <button className="button button--primary button--wide" disabled={!pendingProfile || !profileIsComplete(pendingProfile) || busy} onClick={reviewAssignment}>{copy.reviewAndApply}</button>
-                {selectedRepository.remoteUrl ? (
-                  <>
-                    <div className="remote-ready"><CheckIcon /><div><strong>{copy.githubRemoteReady}</strong><span title={selectedRepository.remoteUrl}>{compactPath(selectedRepository.remoteUrl, 38)}</span></div></div>
-                    <button className="button button--sync button--wide" disabled={!assignedProfile || !selectedRepository.lastAppliedAt || busy} onClick={reviewSync}><BranchIcon />{copy.syncButton}</button>
-                    <button className="button button--commit button--wide" disabled={!assignedProfile || !selectedRepository.lastAppliedAt || busy} onClick={reviewCommit}><CheckIcon />{copy.commitButton}</button>
-                    <button className="button button--pr button--wide" disabled={!assignedProfile?.githubUsername || !assignedProfile.ghConfigDir || !selectedRepository.lastAppliedAt || busy} onClick={reviewPullRequest}><BranchIcon />{copy.pullRequestButton}</button>
-                    <button className="button button--pr-manage button--wide" disabled={!assignedProfile?.githubUsername || !assignedProfile.ghConfigDir || !selectedRepository.lastAppliedAt || busy} onClick={reviewPullRequests}><ShieldIcon />{copy.managePullRequestsButton}</button>
-                    <button className="button button--push button--wide" disabled={!assignedProfile || !selectedRepository.lastAppliedAt || busy} onClick={reviewPush}><BranchIcon />{copy.pushButton}</button>
-                  </>
-                ) : (
-                  <>
-                    <button className="button button--commit button--wide" disabled={!assignedProfile || !selectedRepository.lastAppliedAt || busy} onClick={reviewCommit}><CheckIcon />{copy.commitButton}</button>
-                    <button className="button button--publish button--wide" disabled={!assignedProfile?.githubUsername || !assignedProfile.ghConfigDir || !selectedRepository.lastAppliedAt || busy} onClick={() => assignedProfile && setPublishTarget({ repository: selectedRepository, profile: assignedProfile })}><TerminalIcon />{copy.publishToGithub}</button>
-                  </>
-                )}
-                {removeConfirmingId === selectedRepository.id ? <div className="remove-confirmation">
-                  <p>{copy.removeConfirm(selectedRepository.name)}</p>
-                  <button className="button button--danger" onClick={removeSelected}><TrashIcon />{copy.removeAction}</button>
-                  <button className="button button--ghost" onClick={() => setRemoveConfirmingId(null)}>{copy.removeCancel}</button>
-                </div> : <button className="danger-link" onClick={() => setRemoveConfirmingId(selectedRepository.id)}><TrashIcon />{copy.removeFromGitContext}</button>}
-              </aside>
-            )}
-          </div>
-        </main>
-      </div>
-
-      {editingProfile && <ProfileEditor initial={editingProfile.profile} creating={editingProfile.creating} ghAvailable={environment.gh.available} locale={locale} onClose={() => setEditingProfile(null)} onSave={saveProfileAction} onAutoApprove={updateProfileAutoApprove} />}
       {cloneOpen && <CloneDialog profiles={data.profiles} locale={locale} onClose={() => setCloneOpen(false)} onClone={cloneRepositoryAction} />}
-      {preview && <ApplyDialog preview={preview} locale={locale} onClose={() => setPreview(null)} onApply={applyProfileAction} />}
       {publishTarget && <PublishDialog repository={publishTarget.repository} profile={publishTarget.profile} locale={locale} onClose={() => setPublishTarget(null)} onPublish={publishRepositoryAction} />}
       {pushPreview && <PushDialog preview={pushPreview} locale={locale} onClose={() => setPushPreview(null)} onPush={pushRepositoryAction} />}
       {syncPreview && <SyncDialog preview={syncPreview} locale={locale} onClose={() => setSyncPreview(null)} onRefresh={refreshSync} onPull={pullSync} onPush={pushSync} />}
       {commitPreview && <CommitDialog preview={commitPreview} locale={locale} onClose={() => setCommitPreview(null)} onCommit={commitRepositoryAction} />}
       {pullRequestPreview && <PullRequestDialog preview={pullRequestPreview} locale={locale} onClose={() => setPullRequestPreview(null)} onRefresh={refreshPullRequest} onCreate={createPullRequestAction} />}
       {pullRequestManagement && <PullRequestManagementDialog management={pullRequestManagement} locale={locale} onClose={() => setPullRequestManagement(null)} onRefresh={refreshPullRequests} onMerge={mergePullRequestAction} />}
-    </div>
+    </Shell>
   );
 }
 

@@ -28,6 +28,8 @@ GitContextは、複数のGitHub作業Identityをリポジトリ単位で割り�
 - ProfileのSSH鍵でFetchし、ahead/behind確認、安全なFast-forward Pull、Pushを実行
 - 日本語・英語UI
 
+GUIの最初の画面はリポジトリ一覧です。名前・パス・プロファイルで検索し、適用済み／要再適用／未割り当て／要確認の状態を確認できます。リポジトリを開くと概要でローカル設定の一致状況を確認でき、プロファイルの変更と適用は差分を画面内で確認してから実行します。commit・push・同期・Pull Request・公開は詳細上部の「操作」から利用できます。左メニューの「プロファイル」から一覧と編集画面を開けます。
+
 ## インストール
 
 配布物は[GitHub Releases](https://github.com/menbou404/GitContext/releases)からダウンロードできます。
