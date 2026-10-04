@@ -14,6 +14,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::bootstrap,
             commands::set_locale,
+            commands::refresh_environment,
+            commands::list_backups,
+            commands::restore_backup,
+            commands::open_data_folder,
             commands::inspect_repository_statuses,
             commands::save_profile,
             commands::inspect_github_profile,

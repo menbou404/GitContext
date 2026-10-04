@@ -51,7 +51,7 @@ export const tabCopy = {
 
 export const shellCopy = {
   en: {
-    repositories: "Repositories", profiles: "Profiles", profile: "Profile",
+    repositories: "Repositories", profiles: "Profiles", profile: "Profile", settings: "Settings",
     repositoryCount: (count: number) => `${count} ${count === 1 ? "repository" : "repositories"}`,
     search: "Search repositories", searchPlaceholder: "Search name, path, or profile",
     addRepository: "Add repository", cloneRepository: "Clone from GitHub",
@@ -81,7 +81,7 @@ export const shellCopy = {
     assignmentMismatch: "The local profile assignment differs.",
   },
   ja: {
-    repositories: "リポジトリ", profiles: "プロファイル", profile: "プロファイル",
+    repositories: "リポジトリ", profiles: "プロファイル", profile: "プロファイル", settings: "設定",
     repositoryCount: (count: number) => `${count}件`,
     search: "リポジトリを検索", searchPlaceholder: "名前・パス・プロファイルで検索",
     addRepository: "リポジトリを追加", cloneRepository: "GitHubからclone",
@@ -109,6 +109,39 @@ export const shellCopy = {
     openProfiles: "プロファイルを開く",
     authenticatedAs: (username: string) => `@${username} で認証中`,
     assignmentMismatch: "ローカルのプロファイル割り当てが一致しません。",
+  },
+} as const;
+
+export const settingsCopy = {
+  en: {
+    title: "Settings", environment: "Environment", language: "Language", data: "Data",
+    git: "Git", gh: "GitHub CLI", ssh: "SSH", found: "Available", missing: "Not found",
+    gitMissing: "Git was not found. Install Git and restart GitContext.",
+    ghMissing: "GitHub CLI was not found. Install it and restart GitContext.",
+    sshMissing: "SSH was not found. Install OpenSSH and restart GitContext.",
+    recheck: "Check again", checking: "Checking…", saveFolder: "Save folder", openFolder: "Open folder",
+    development: "Development data", release: "Release data", demo: "Browser preview", demoNote: "Fictional data only. No settings are written.",
+    developmentNote: "This development build uses a separate data folder.",
+    backups: "Backups", backupLimit: "Up to 20 backups are kept.", noBackups: "No backups yet.",
+    date: "Date", size: "Size", restorePoint: "Restore this point", restore: "Restore", cancel: "Cancel",
+    restoring: "Restoring…", restoreTarget: "Backup", restoreWarning: "The current contents will be kept as a backup.",
+    restored: "Backup restored. The current contents were saved as a backup.",
+    demoRestore: "Preview only: this backup would be restored.", demoFolder: "Preview only: no local folder is opened.",
+  },
+  ja: {
+    title: "設定", environment: "環境", language: "言語", data: "データ",
+    git: "Git", gh: "GitHub CLI", ssh: "SSH", found: "利用できます", missing: "見つかりません",
+    gitMissing: "Gitが見つかりません。インストールしてGitContextを再起動してください。",
+    ghMissing: "GitHub CLIが見つかりません。インストールしてGitContextを再起動してください。",
+    sshMissing: "SSHが見つかりません。OpenSSHをインストールしてGitContextを再起動してください。",
+    recheck: "再確認", checking: "確認中…", saveFolder: "保存先フォルダ", openFolder: "フォルダを開く",
+    development: "開発版のデータ", release: "配布版のデータ", demo: "ブラウザプレビュー", demoNote: "架空データのみを表示し、設定は保存しません。",
+    developmentNote: "開発版は別の保存先を使います。",
+    backups: "バックアップ", backupLimit: "最新20件まで保存します。", noBackups: "バックアップはまだありません。",
+    date: "日時", size: "サイズ", restorePoint: "この時点に戻す", restore: "戻す", cancel: "やめる",
+    restoring: "復元中…", restoreTarget: "バックアップ", restoreWarning: "現在の内容はバックアップとして残ります。",
+    restored: "バックアップを復元しました。復元前の内容もバックアップに残しました。",
+    demoRestore: "プレビューです。このバックアップに戻す操作を表示しています。", demoFolder: "プレビューです。ローカルのフォルダは開きません。",
   },
 } as const;
 

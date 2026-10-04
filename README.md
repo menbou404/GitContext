@@ -101,7 +101,7 @@ npm run tauri dev
 
 Windowsでは、配布版は`%USERPROFILE%\.gitcontext`、`npm run tauri dev`などのdebugビルドは`%USERPROFILE%\.gitcontext-dev`にProfileなどを保存します。旧保存先（配布版の`%APPDATA%\app.gitcontext.desktop`、開発版の`%APPDATA%\app.gitcontext.dev`）にデータがあり、新保存先に`state.json`がない場合、GUIまたはMCPの起動時に自動移行します。旧データはそのまま残ります。macOSとLinuxの保存先は従来どおりです。環境変数`GITCONTEXT_DATA_DIR`に絶対パスを指定すると、保存先を変更できます（自動移行は行いません）。
 
-状態ファイルは保存のたびに、直前の内容を同じフォルダの`backups\state-<日時>.json`へ残します（最新20世代）。誤って変更・削除した場合は、アプリを終了してから目的のバックアップを`state.json`としてコピーしてください。
+状態ファイルは保存のたびに、直前の内容を同じフォルダの`backups\state-<日時>.json`へ残します（最新20世代）。設定画面でバックアップを選んで復元できます。復元前の内容もバックアップに残ります。
 
 状態ファイルには個人のProfileが含まれます。リポジトリ内へコピーしたり、commitしたりしないでください。
 

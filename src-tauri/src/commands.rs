@@ -2,7 +2,7 @@ use gitcontext_core::{
     github::{CreatePullRequestInput, GithubAuthPrompt, MergePullRequestInput},
     models::*,
     operations, repository_status,
-    storage::StateStore,
+    storage::{BackupEntry, StateStore},
 };
 use tauri::{AppHandle, Emitter, State};
 const GITHUB_AUTH_PROMPT_EVENT: &str = "github-auth-prompt";
@@ -15,6 +15,38 @@ pub fn bootstrap(store: State<'_, StateStore>) -> Result<BootstrapResult, String
 #[tauri::command]
 pub fn set_locale(store: State<'_, StateStore>, locale: String) -> Result<AppSettings, String> {
     operations::set_locale(&store, locale)
+}
+
+#[tauri::command]
+pub fn refresh_environment() -> EnvironmentStatus {
+    gitcontext_core::environment::environment_status()
+}
+
+#[tauri::command]
+pub fn list_backups(store: State<'_, StateStore>) -> Result<Vec<BackupEntry>, String> {
+    store.list_backups()
+}
+
+#[tauri::command]
+pub fn restore_backup(store: State<'_, StateStore>, file_name: String) -> Result<AppData, String> {
+    store.restore_backup(&file_name)
+}
+
+#[tauri::command]
+pub fn open_data_folder(store: State<'_, StateStore>) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer.exe")
+            .arg(store.config_dir())
+            .spawn()
+            .map_err(|error| format!("Could not open the data folder: {error}"))?;
+        Ok(())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = store;
+        Err("Opening the data folder is not supported on this platform.".into())
+    }
 }
 
 #[tauri::command]
