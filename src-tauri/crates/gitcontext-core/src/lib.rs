@@ -1,3 +1,4 @@
+pub mod audit;
 pub mod environment;
 pub mod git_ops;
 pub mod github;

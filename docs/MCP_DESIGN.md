@@ -248,11 +248,11 @@ MRTRの`requestState`はサーバー側の確認待ちを指す不透明なラ�
 
 ## 監査ログ
 
-MCPから実行した`local`と`remote`の操作を、状態ディレクトリの`mcp-audit.jsonl`に1行ずつ記録する。
+MCPから実行した`local`と`remote`の操作、およびGUIからのプロファイル適用（成功・失敗）を、状態ディレクトリの`mcp-audit.jsonl`に1行ずつ記録する。5 MiBを超えると`mcp-audit.1.jsonl`へローテーションする。履歴画面は両方のファイルから新しい順に最大500件を表示する。
 
-- 記録する項目: 日時、ツール名、リポジトリID、Profile ID、主要な結果（commit ID、PR番号など）、成否
+- 記録する項目: 日時、ツール名、リポジトリID、Profile ID、主要な結果（commit ID、PR番号など）、成否、クライアント名、確認方法。任意の`actor`はGUIからの適用で`"gui"`、MCPでは省略（または`"mcp"`）。旧レコードの主体はclientの有無で判定する。
 - 秘密情報とファイルの中身は記録しない。
-- CHANGELOGのPlannedにある「適用履歴とワンクリックrollback」の土台として、将来はGUIでも表示する。
+- GUIからの適用は`tool: "apply_profile"`、`actor: "gui"`、clientとconfirmationはnullで記録する。監査ログへの書き込み失敗は警告に留め、適用結果を変えない。GUIのcommitやpushなどは現段階では記録しない。
 
 ## クライアントの設定
 

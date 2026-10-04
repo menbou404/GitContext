@@ -4,6 +4,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { demoBootstrap } from "./demoData";
 import type {
   AppData,
+  AuditEntry,
   BackupEntry,
   AppSettings,
   AutoApprove,
@@ -38,6 +39,13 @@ let demoState: AppData = typeof window !== "undefined" && !isTauri() && new URLS
   ? { ...structuredClone(demoBootstrap.data), profiles: [], repositories: [] }
   : structuredClone(demoBootstrap.data);
 const demoMergedPullRequests = new Set<number>();
+const demoHistory: AuditEntry[] = [
+  { at: "2026-10-04T09:25:00Z", tool: "apply_profile", repositoryId: "repo-personal", profileId: "open-source", outcome: "success", summary: "Profile applied", client: null, confirmation: null, actor: "gui" },
+  { at: "2026-10-04T08:40:00Z", tool: "create_pull_request", repositoryId: "repo-school", profileId: "university-lab", outcome: "success", summary: "PR #12", client: "Demo AI", confirmation: "elicitation" },
+  { at: "2026-10-03T14:05:00Z", tool: "push", repositoryId: "repo-personal", profileId: "open-source", outcome: "rejected", summary: "Remote operation rejected", client: "Demo AI", confirmation: "client" },
+  { at: "2026-10-02T11:15:00Z", tool: "commit", repositoryId: "repo-reapply", profileId: "open-source", outcome: "failed", summary: "Operation failed", client: "Demo AI", confirmation: null },
+  { at: "2026-10-01T10:00:00Z", tool: "pull", repositoryId: "repo-attention", profileId: "client-work", outcome: "success", summary: "Pulled", client: "Demo AI", confirmation: "auto" },
+];
 const demoReapplied = new Set<string>();
 const demoChanges = new Map<string, CommitPreview["changes"]>([["repo-personal", [
   { status: "M", path: "src/player.ts" },
@@ -370,6 +378,7 @@ export async function applyAssignment(
   profileId: string,
 ): Promise<AppData> {
   if (!inDesktopApp()) {
+    demoHistory.unshift({ at: new Date().toISOString(), tool: "apply_profile", repositoryId, profileId, outcome: "success", summary: "Profile applied", client: null, confirmation: null, actor: "gui" });
     demoReapplied.add(repositoryId);
     demoState.repositories = demoState.repositories.map((repo) =>
       repo.id === repositoryId
@@ -379,6 +388,11 @@ export async function applyAssignment(
     return structuredClone(demoState);
   }
   return invoke<AppData>("apply_profile", { repositoryId, profileId });
+}
+
+export async function listHistory(): Promise<AuditEntry[]> {
+  if (!inDesktopApp()) return structuredClone(demoHistory);
+  return invoke<AuditEntry[]>("list_history");
 }
 
 export async function publishRepository(options: PublishOptions): Promise<PublishResult> {

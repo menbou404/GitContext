@@ -147,6 +147,24 @@ html, body, #root { min-width: 1050px; }
 .modal .button:disabled { color: var(--ui-muted); border-color: var(--ui-input-line); background: var(--ui-selected); opacity: 1; }
 .ui-shell button:focus-visible, .ui-shell select:focus-visible, .ui-shell input:focus-visible { outline: 2px solid var(--ui-ink); outline-offset: 2px; }
 .ui-shell textarea:focus-visible, .ui-shell a:focus-visible { outline: 2px solid var(--ui-ink); outline-offset: 2px; }
+.ui-history-intro { margin: -10px 0 0; font-size: 13px; }
+.ui-history-filters { display: flex; gap: 12px; flex-wrap: wrap; }
+.ui-history-filters .ui-field { min-width: 190px; }
+.ui-history-scroll { max-width: 100%; overflow-x: auto; }
+.ui-history-table { min-width: 1050px; table-layout: auto; }
+.ui-history-table th, .ui-history-table td, .ui-history-table th:first-child, .ui-history-table td:first-child, .ui-history-table th:last-child, .ui-history-table td:last-child { width: auto; padding: 10px 12px; white-space: normal; vertical-align: top; }
+.ui-history-table td { border-bottom: 1px solid var(--ui-line-soft); font-size: 13px; }
+.ui-history-table tbody tr:last-child td { border-bottom: 0; }
+.ui-history-table td:first-child { white-space: nowrap; }
+.ui-history-table td:nth-child(2) { min-width: 155px; }
+.ui-history-table td:nth-child(2) small { display: block; margin-top: 3px; color: var(--ui-muted); font-weight: 400; overflow-wrap: anywhere; }
+.ui-history-table td:nth-child(4) .ui-profile { display: inline-flex; align-items: center; gap: 7px; }
+.ui-history-result { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.ui-history-result--success { color: var(--ui-ready); }
+.ui-history-result--failed { color: var(--ui-danger); }
+.ui-history-result--rejected { color: var(--ui-caution); }
+.ui-history-result > span { font-weight: 700; }
+.ui-history-error { margin: 0; color: var(--ui-danger); }
 .ui-settings-page { max-width: 950px; }
 .ui-settings-heading, .ui-backup-heading, .ui-data-folder, .ui-backup-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .ui-settings-heading h2, .ui-backup-heading h3 { margin: 0; font-size: 15px; }

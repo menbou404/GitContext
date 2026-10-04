@@ -1,4 +1,5 @@
 use gitcontext_core::{
+    audit::{self, AuditEntry},
     github::{CreatePullRequestInput, GithubAuthPrompt, MergePullRequestInput},
     models::*,
     operations, repository_status,
@@ -178,7 +179,12 @@ pub fn apply_profile(
     repository_id: String,
     profile_id: String,
 ) -> Result<AppData, String> {
-    operations::apply_profile(&store, repository_id, profile_id)
+    operations::apply_profile_from_gui(&store, repository_id, profile_id)
+}
+
+#[tauri::command]
+pub fn list_history(store: State<'_, StateStore>) -> Result<Vec<AuditEntry>, String> {
+    audit::read_recent(&store)
 }
 
 #[tauri::command]

@@ -29,6 +29,7 @@ pub fn run() {
             commands::remove_repository,
             commands::preview_assignment,
             commands::apply_profile,
+            commands::list_history,
             commands::publish_repository,
             commands::list_github_repositories,
             commands::clone_repository,

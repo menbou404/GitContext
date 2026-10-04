@@ -432,6 +432,33 @@ pub fn apply_profile(
     Ok(data)
 }
 
+/// GUI entry point. The MCP entry point keeps its existing caller-owned audit record.
+pub fn apply_profile_from_gui(
+    store: &StateStore,
+    repository_id: String,
+    profile_id: String,
+) -> Result<AppData, String> {
+    let result = apply_profile(store, repository_id.clone(), profile_id.clone());
+    let record = crate::audit::Audit::new(
+        "apply_profile",
+        Some(&repository_id),
+        Some(&profile_id),
+        if result.is_ok() { "success" } else { "failed" },
+        if result.is_ok() {
+            "Profile applied"
+        } else {
+            "Operation failed"
+        },
+        None,
+        None,
+    )
+    .with_actor("gui");
+    if let Err(error) = crate::audit::append(store, &record) {
+        eprintln!("Audit log could not be written: {error}");
+    }
+    result
+}
+
 pub fn preview_push(
     store: &StateStore,
     repository_id: String,
@@ -1076,6 +1103,47 @@ mod auto_approve_tests {
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
+    }
+
+    #[test]
+    fn gui_apply_records_success_and_failure_without_sensitive_values() {
+        let root =
+            std::env::temp_dir().join(format!("gitcontext-gui-audit-{}", uuid::Uuid::new_v4()));
+        let repo = root.join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        git(&repo, &["init", "-b", "main"]);
+        let store = StateStore::new(root.join("data"));
+        let record = add_repository(&store, repo.to_string_lossy().into_owned()).unwrap();
+        save_profile(
+            &store,
+            Profile {
+                id: "sample".into(),
+                label: "Sample".into(),
+                accent: "#112233".into(),
+                git_name: "Example Person".into(),
+                git_email: "sample@example.com".into(),
+                github_username: None,
+                ssh_key_path: None,
+                gh_config_dir: None,
+                auto_approve: ProfileAutoApprove::default(),
+            },
+        )
+        .unwrap();
+        apply_profile_from_gui(&store, record.id.clone(), "sample".into()).unwrap();
+        assert!(apply_profile_from_gui(&store, record.id, "missing".into()).is_err());
+        let entries = crate::audit::read_recent(&store).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert!(entries.iter().any(|entry| entry.outcome == "failed"));
+        assert!(entries.iter().any(|entry| entry.outcome == "success"));
+        assert!(entries
+            .iter()
+            .all(|entry| entry.actor.as_deref() == Some("gui")
+                && entry.client.is_none()
+                && entry.confirmation.is_none()));
+        let contents = fs::read_to_string(store.config_dir().join("mcp-audit.jsonl")).unwrap();
+        assert!(!contents.contains("sample@example.com"));
+        assert!(!contents.contains("Example Person"));
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

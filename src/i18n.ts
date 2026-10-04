@@ -51,7 +51,7 @@ export const tabCopy = {
 
 export const shellCopy = {
   en: {
-    repositories: "Repositories", profiles: "Profiles", profile: "Profile", settings: "Settings",
+    repositories: "Repositories", profiles: "Profiles", profile: "Profile", history: "History", settings: "Settings",
     repositoryCount: (count: number) => `${count} ${count === 1 ? "repository" : "repositories"}`,
     search: "Search repositories", searchPlaceholder: "Search name, path, or profile",
     addRepository: "Add repository", cloneRepository: "Clone from GitHub",
@@ -81,7 +81,7 @@ export const shellCopy = {
     assignmentMismatch: "The local profile assignment differs.",
   },
   ja: {
-    repositories: "リポジトリ", profiles: "プロファイル", profile: "プロファイル", settings: "設定",
+    repositories: "リポジトリ", profiles: "プロファイル", profile: "プロファイル", history: "履歴", settings: "設定",
     repositoryCount: (count: number) => `${count}件`,
     search: "リポジトリを検索", searchPlaceholder: "名前・パス・プロファイルで検索",
     addRepository: "リポジトリを追加", cloneRepository: "GitHubからclone",
@@ -109,6 +109,25 @@ export const shellCopy = {
     openProfiles: "プロファイルを開く",
     authenticatedAs: (username: string) => `@${username} で認証中`,
     assignmentMismatch: "ローカルのプロファイル割り当てが一致しません。",
+  },
+} as const;
+
+export const historyCopy = {
+  en: {
+    title: "History", description: "Profile applications and AI client operations.", reload: "Reload", loading: "Loading history…",
+    date: "Date and time", operation: "Operation", repository: "Repository", profile: "Profile", actor: "Actor", result: "Result", confirmation: "Confirmation method",
+    allRepositories: "All repositories", allProfiles: "All profiles", allActors: "All actors", gui: "GUI", aiClient: "AI client", unknownClient: "mcp",
+    deletedRepository: "Deleted repository", deletedProfile: "Deleted profile", none: "None", empty: "No history to show.", retry: "Check the data folder and reload.",
+    success: "Success", failed: "Failed", rejected: "Rejected", confirmationScreen: "Confirmation screen", automatic: "Auto approved", clientApproval: "Left to client",
+    applyProfile: "Apply profile", createPullRequest: "Create Pull Request", mergePullRequest: "Merge Pull Request", publishRepository: "Publish repository", cloneRepository: "Clone repository", addRepository: "Add repository", createBranch: "Create branch", pull: "pull", push: "push", commit: "commit",
+  },
+  ja: {
+    title: "履歴", description: "プロファイルの適用とAIクライアントによる操作の記録です。", reload: "再読み込み", loading: "履歴を読み込み中…",
+    date: "日時", operation: "操作", repository: "リポジトリ", profile: "プロファイル", actor: "主体", result: "結果", confirmation: "確認の方法",
+    allRepositories: "すべてのリポジトリ", allProfiles: "すべてのプロファイル", allActors: "すべて", gui: "GUI", aiClient: "AIクライアント", unknownClient: "mcp",
+    deletedRepository: "削除済みのリポジトリ", deletedProfile: "削除済みのプロファイル", none: "なし", empty: "表示する履歴がありません。", retry: "データフォルダを確認して再読み込みしてください。",
+    success: "成功", failed: "失敗", rejected: "拒否", confirmationScreen: "確認画面", automatic: "自動承認", clientApproval: "クライアントに任せた",
+    applyProfile: "プロファイルの適用", createPullRequest: "Pull Requestの作成", mergePullRequest: "Pull Requestのmerge", publishRepository: "GitHubへの公開", cloneRepository: "リポジトリのclone", addRepository: "リポジトリの追加", createBranch: "ブランチの作成", pull: "pull", push: "push", commit: "commit",
   },
 } as const;
 

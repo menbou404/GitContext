@@ -10,6 +10,18 @@ export interface Profile {
   autoApprove: ProfileAutoApprove;
 }
 
+export interface AuditEntry {
+  at: string;
+  tool: string;
+  repositoryId: string | null;
+  profileId: string | null;
+  outcome: string;
+  summary: string;
+  client: string | null;
+  confirmation: string | null;
+  actor?: "gui" | "mcp" | null;
+}
+
 export interface ProfileAutoApprove {
   cloneRepository: boolean;
 }
