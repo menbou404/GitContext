@@ -149,6 +149,28 @@ pub struct GhProfileStatus {
     pub config_dir: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RepositoryState {
+    Ready,
+    Reapply,
+    Unassigned,
+    Attention,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryStatus {
+    pub repository_id: String,
+    pub state: RepositoryState,
+    pub branch: Option<String>,
+    pub uncommitted_changes: Option<usize>,
+    pub identity_in_sync: bool,
+    pub mismatched_keys: Vec<String>,
+    pub github: Option<GhProfileStatus>,
+    pub error: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConfigChange {

@@ -29,10 +29,12 @@ import type {
   PushResult,
   SyncPreview,
   RepositoryRecord,
+  RepositoryStatus,
 } from "./types";
 
 let demoState: AppData = structuredClone(demoBootstrap.data);
 const demoMergedPullRequests = new Set<number>();
+const demoReapplied = new Set<string>();
 
 const inDesktopApp = () => isTauri();
 
@@ -44,6 +46,34 @@ export async function bootstrap(): Promise<BootstrapResult> {
     return { ...structuredClone(demoBootstrap), data: structuredClone(demoState) };
   }
   return invoke<BootstrapResult>("bootstrap");
+}
+
+export async function inspectRepositoryStatuses(): Promise<RepositoryStatus[]> {
+  if (!inDesktopApp()) {
+    return demoState.repositories.map((repository) => {
+      const profile = demoState.profiles.find((item) => item.id === repository.profileId);
+      const state = !profile ? "unassigned"
+        : repository.id === "repo-reapply" && !demoReapplied.has(repository.id) ? "reapply"
+        : repository.id === "repo-attention" && profile.id === "client-work" ? "attention" : "ready";
+      const github: GhProfileStatus | null = profile ? {
+        available: true,
+        authenticated: state !== "attention",
+        username: state === "attention" ? null : profile.githubUsername,
+        configDir: profile.ghConfigDir,
+      } : null;
+      return {
+        repositoryId: repository.id,
+        state,
+        branch: repository.branch,
+        uncommittedChanges: repository.id === "repo-personal" ? 3 : 0,
+        identityInSync: state === "ready" || state === "attention",
+        mismatchedKeys: state === "reapply" ? ["user.email"] : [],
+        github,
+        error: null,
+      };
+    });
+  }
+  return invoke<RepositoryStatus[]>("inspect_repository_statuses");
 }
 
 export async function chooseRepositoryDirectory(title = "Select a Git repository"): Promise<string | null> {
@@ -285,6 +315,7 @@ export async function applyAssignment(
   profileId: string,
 ): Promise<AppData> {
   if (!inDesktopApp()) {
+    demoReapplied.add(repositoryId);
     demoState.repositories = demoState.repositories.map((repo) =>
       repo.id === repositoryId
         ? { ...repo, profileId, lastAppliedAt: new Date().toISOString() }
