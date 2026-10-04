@@ -1,7 +1,7 @@
 use gitcontext_core::{
     github::{CreatePullRequestInput, GithubAuthPrompt, MergePullRequestInput},
     models::*,
-    operations,
+    operations, repository_status,
     storage::StateStore,
 };
 use tauri::{AppHandle, Emitter, State};
@@ -10,6 +10,24 @@ const GITHUB_AUTH_PROMPT_EVENT: &str = "github-auth-prompt";
 #[tauri::command]
 pub fn bootstrap(store: State<'_, StateStore>) -> Result<BootstrapResult, String> {
     operations::bootstrap(&store)
+}
+
+#[tauri::command]
+pub async fn inspect_repository_statuses(
+    store: State<'_, StateStore>,
+) -> Result<Vec<RepositoryStatus>, String> {
+    let store = (*store).clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let data = {
+            let _guard = store.lock()?;
+            store.load()?
+        };
+        Ok(repository_status::inspect_repository_statuses(
+            &store, &data,
+        ))
+    })
+    .await
+    .map_err(|error| format!("Repository status task failed: {error}"))?
 }
 
 #[tauri::command]
