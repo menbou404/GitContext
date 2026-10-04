@@ -52,7 +52,7 @@ export const tabCopy = {
 export const shellCopy = {
   en: {
     repositories: "Repositories", profiles: "Profiles", profile: "Profile",
-    repositoryCount: (count: number) => `${count} repositories`,
+    repositoryCount: (count: number) => `${count} ${count === 1 ? "repository" : "repositories"}`,
     search: "Search repositories", searchPlaceholder: "Search name, path, or profile",
     addRepository: "Add repository", cloneRepository: "Clone from GitHub",
     all: "All", needsAction: "Needs action", unassignedFilter: "Unassigned",
@@ -72,7 +72,7 @@ export const shellCopy = {
     removeConfirm: (name: string) => `Remove ${name} from GitContext? Git settings will stay on this computer.`,
     removeAction: "Remove", cancel: "Cancel", apply: "Apply profile", applying: "Applying…",
     noRepositories: "No repositories found", noProfiles: "No profiles yet", addProfile: "Add profile",
-    editProfile: "Edit profile", assignedCount: (count: number) => `${count} repositories`,
+    editProfile: "Edit profile", assignedCount: (count: number) => `${count} ${count === 1 ? "repository" : "repositories"}`,
     envMissing: (tools: string) => `${tools} unavailable. Install it and restart GitContext, then retry.`,
     statusError: (name: string, error: string) => `${name}: ${error} Check this repository and refresh.`,
     refresh: "Refresh statuses", refreshing: "Refreshing…", refreshedAt: (time: string) => `Updated at ${time}`, language: "Language", actionUnavailable: "Apply a profile to enable this action.",
@@ -112,6 +112,27 @@ export const shellCopy = {
   },
 } as const;
 
+export const profileCopy = {
+  en: {
+    create: "Create profile", name: "Name", account: "GitHub account", connection: "GitHub connection", assigned: "Assigned repositories",
+    noAccount: "Not set", connected: "Connected", disconnected: "Not connected", different: "Different account", checking: "Checking…",
+    repositoryCount: (count: number) => `${count} ${count === 1 ? "repository" : "repositories"}`, refresh: "Refresh status", refreshing: "Refreshing…", empty: "No profiles yet",
+    guideTitle: "Get started", guideLead: "Complete these steps to set up GitContext.",
+    stepProfile: "Create a profile", stepGithub: "Connect to GitHub", stepRepository: "Add a repository",
+    stepHelp: ["Set a name and Git author.", "Connect the profile to your GitHub account.", "Choose a local Git repository."],
+    stepAction: ["Create profile", "Connect to GitHub", "Add repository"], completed: "Completed",
+  },
+  ja: {
+    create: "プロファイルを作成", name: "名前", account: "GitHubアカウント", connection: "GitHub連携", assigned: "割り当てたリポジトリ",
+    noAccount: "未設定", connected: "接続済み", disconnected: "未接続", different: "別のアカウント", checking: "確認中…",
+    repositoryCount: (count: number) => `${count}件`, refresh: "状態を更新", refreshing: "更新中…", empty: "プロファイルがありません",
+    guideTitle: "はじめに", guideLead: "次の手順でGitContextを使い始められます。",
+    stepProfile: "プロファイルを作る", stepGithub: "GitHubと連携する", stepRepository: "リポジトリを追加する",
+    stepHelp: ["名前とGit作成者を設定します。", "プロファイルをGitHubアカウントに接続します。", "ローカルのGitリポジトリを選びます。"],
+    stepAction: ["プロファイルを作成", "GitHubと連携", "リポジトリを追加"], completed: "完了",
+  },
+} as const;
+
 export const uiCopy = {
   en: {
     documentTitle: "GitContext",
@@ -128,6 +149,7 @@ export const uiCopy = {
     profileName: "Profile name",
     profileNamePlaceholder: "Personal",
     color: "Color",
+    customColor: "Color code",
     useColor: (accent: string) => `Use color ${accent}`,
     gitAuthorName: "Git author name",
     gitAuthorNamePlaceholder: "Your Name",
@@ -448,6 +470,7 @@ export const uiCopy = {
     profileName: "プロファイル名",
     profileNamePlaceholder: "個人用",
     color: "カラー",
+    customColor: "カラーコード",
     useColor: (accent: string) => `カラー ${accent} を使用`,
     gitAuthorName: "Gitの作成者名",
     gitAuthorNamePlaceholder: "氏名",

@@ -127,13 +127,10 @@ html, body, #root { min-width: 1050px; }
 .ui-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 14px; }
 .ui-remove { padding-top: 8px; }
 .ui-link-danger { padding: 0; border: 0; background: none; color: var(--ui-danger); text-decoration: underline; }
-.ui-profile-list { display: grid; gap: 12px; }
-.ui-profile-list .ui-card { display: flex; align-items: center; gap: 18px; }
-.ui-profile-list .ui-card .ui-muted { margin-left: auto; }
 .ui-inline-editor { width: 100%; }
 .ui-inline-profile-modal { width: min(840px, 100%); max-height: none; overflow: visible; border: 1px solid var(--ui-line); border-radius: 8px; box-shadow: none; animation: none; }
 .ui-inline-profile-modal .eyebrow { display: none; }
-.ui-inline-profile-modal .modal-header h2 { color: var(--ui-ink); font: 700 20px/1.4 var(--ui-font); }
+.ui-inline-profile-modal .modal-header h1 { margin: 0; color: var(--ui-ink); font: 700 20px/1.4 var(--ui-font); }
 .ui-inline-profile-modal .modal-lead, .ui-inline-profile-modal .setup-section-head p, .ui-inline-profile-modal .connection-card small { color: var(--ui-muted); font-size: 12px; }
 .ui-inline-profile-modal .profile-setup-section, .ui-inline-profile-modal .connection-card, .ui-inline-profile-modal .connection-card.is-connected { border-color: var(--ui-line); border-radius: 8px; background: var(--ui-surface); }
 .ui-inline-profile-modal .setup-section-head > span { color: var(--ui-ink); background: var(--ui-selected); font-size: 12px; }
@@ -152,6 +149,38 @@ html, body, #root { min-width: 1050px; }
 .modal .button:disabled { color: var(--ui-muted); border-color: var(--ui-input-line); background: var(--ui-selected); opacity: 1; }
 .ui-shell button:focus-visible, .ui-shell select:focus-visible, .ui-shell input:focus-visible { outline: 2px solid var(--ui-ink); outline-offset: 2px; }
 .ui-shell textarea:focus-visible, .ui-shell a:focus-visible { outline: 2px solid var(--ui-ink); outline-offset: 2px; }
+.ui-profile-table th:first-child, .ui-profile-table td:first-child { width: 30%; }
+.ui-profile-table th:nth-child(2) { width: 24%; }
+.ui-profile-table th:nth-child(3) { width: 26%; }
+.ui-profile-table th:last-child, .ui-profile-table td:last-child { width: 20%; }
+.ui-profile-name { display: flex; align-items: center; gap: 10px; }
+.ui-profile-name strong { display: inline; }
+.ui-first-run { max-width: 900px; }
+.ui-first-run > p { margin: 0; }
+.ui-guide-steps { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.ui-guide-steps li { display: flex; align-items: center; gap: 14px; }
+.ui-guide-steps li > div { flex: 1; }
+.ui-guide-steps h2 { margin: 0; font-size: 15px; }
+.ui-guide-steps p { margin: 2px 0 0; font-size: 12px; }
+.ui-guide-marker { width: 28px; height: 28px; flex: 0 0 28px; display: grid; place-items: center; border: 1px solid var(--ui-line); border-radius: 50%; font-weight: 700; }
+.ui-guide-marker svg { width: 17px; }
+.ui-color-custom { display: flex; align-items: center; gap: 10px; margin-top: 12px; color: var(--ui-ink); font-size: 13px; }
+.ui-color-custom input { width: 110px; min-height: 34px; padding: 4px 8px; border: 1px solid var(--ui-input-line); border-radius: 6px; background: var(--ui-surface); color: var(--ui-ink); font-family: var(--ui-mono); }
+.ui-inline-profile-modal .github-device-card { border-color: var(--ui-line); background: var(--ui-surface); color: var(--ui-ink); }
+.ui-inline-profile-modal .github-device-card p, .ui-inline-profile-modal .github-device-copy span { color: var(--ui-muted); }
+.ui-inline-profile-modal .github-device-copy code { color: var(--ui-ink); }
+.ui-inline-profile-modal .auto-approve-settings { border-color: var(--ui-line); color: var(--ui-ink); background: var(--ui-surface); }
+.ui-inline-profile-modal .auto-approve-settings legend, .ui-inline-profile-modal .auto-approve-settings label { color: var(--ui-ink); font-size: 13px; }
+.ui-inline-profile-modal .auto-approve-settings input { accent-color: var(--ui-ink); }
+.ui-inline-profile-modal .connection-actions .button, .ui-inline-profile-modal .github-device-actions .button { min-height: 36px; padding: 0 12px; font-size: 13px; }
+.ui-inline-profile-modal .github-device-copy span, .ui-inline-profile-modal .github-device-card p { font-size: 12px; }
+.ui-inline-profile-modal .github-device-copy code { font-family: var(--ui-mono); }
+.ui-inline-profile-modal .field input:focus, .ui-inline-profile-modal .field select:focus, .ui-inline-profile-modal .path-input:focus-within, .ui-inline-profile-modal .input-prefix:focus-within { border-color: var(--ui-ink); box-shadow: none; }
+.ui-inline-profile-modal .input-prefix > span { color: var(--ui-muted); font-size: 13px; }
+.ui-inline-profile-modal .install-command { color: var(--ui-muted); border-color: var(--ui-line); background: var(--ui-canvas); font: 12px var(--ui-mono); }
+.ui-inline-profile-modal .inline-error { color: var(--ui-danger); border: 1px solid var(--ui-danger); background: var(--ui-surface); font-size: 12px; }
+.ui-inline-profile-modal .modal-actions { border-top-color: var(--ui-line); }
+.ui-inline-profile-modal .accent-options button { color: var(--ui-surface); border-color: var(--ui-surface); box-shadow: 0 0 0 1px var(--ui-line); }
 .ui-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--ui-line); }
 .ui-tabs button { min-height: 40px; padding: 0 14px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--ui-muted); font: 14px var(--ui-font); }
 .ui-tabs button[aria-selected="true"] { border-bottom-color: var(--ui-ink); color: var(--ui-ink); font-weight: 700; }
