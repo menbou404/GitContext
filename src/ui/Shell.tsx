@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { BranchIcon, FolderIcon } from "../Icons";
 import { shellCopy, type Locale } from "../i18n";
 
-export type ShellPage = "repositories" | "profiles" | "history" | "settings";
+export type ShellPage = "repositories" | "profiles" | "ai" | "history" | "settings";
 
 export function Shell({ page, locale, repositoryCount, notice, noticeLink, onNavigate, onDismiss, children }: {
   page: ShellPage;
@@ -23,6 +23,9 @@ export function Shell({ page, locale, repositoryCount, notice, noticeLink, onNav
       </button>
       <button type="button" className={page === "profiles" ? "active" : ""} aria-current={page === "profiles" ? "page" : undefined} onClick={() => onNavigate("profiles")}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c1.2-3.5 4-5 7-5s5.8 1.5 7 5"/></svg> <span>{copy.profiles}</span>
+      </button>
+      <button type="button" className={page === "ai" ? "active" : ""} aria-current={page === "ai" ? "page" : undefined} onClick={() => onNavigate("ai")}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="M9 3v4M15 3v4M7 7h10v4a5 5 0 0 1-10 0zM12 16v5"/></svg><span>{copy.aiIntegration}</span>
       </button>
       <button type="button" className={page === "history" ? "active" : ""} aria-current={page === "history" ? "page" : undefined} onClick={() => onNavigate("history")}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg> <span>{copy.history}</span>

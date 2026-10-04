@@ -1,4 +1,8 @@
 use gitcontext_core::{
+    ai_clients::{
+        self, Action as AiAction, Client as AiClient, Inventory as AiInventory, Plan as AiPlan,
+        Tier as AiTier,
+    },
     audit::{self, AuditEntry},
     github::{CreatePullRequestInput, GithubAuthPrompt, MergePullRequestInput},
     models::*,
@@ -7,6 +11,43 @@ use gitcontext_core::{
 };
 use tauri::{AppHandle, Emitter, State};
 const GITHUB_AUTH_PROMPT_EVENT: &str = "github-auth-prompt";
+
+#[tauri::command]
+pub fn list_ai_clients() -> Result<AiInventory, String> {
+    ai_clients::list(&ai_clients::default_paths()?)
+}
+
+#[tauri::command]
+pub fn plan_ai_client(
+    client: AiClient,
+    action: AiAction,
+    tier: AiTier,
+    trust: bool,
+) -> Result<AiPlan, String> {
+    ai_clients::plan(&ai_clients::default_paths()?, client, action, tier, trust)
+}
+
+#[tauri::command]
+pub async fn apply_ai_client(
+    store: State<'_, StateStore>,
+    plan: AiPlan,
+) -> Result<Option<std::path::PathBuf>, String> {
+    let state_dir = store.config_dir().to_path_buf();
+    tauri::async_runtime::spawn_blocking(move || {
+        ai_clients::apply(&ai_clients::default_paths()?, &state_dir, &plan)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn verify_ai_client(client: AiClient) -> Result<usize, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        ai_clients::verify(&ai_clients::default_paths()?, client)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
 
 #[tauri::command]
 pub fn bootstrap(store: State<'_, StateStore>) -> Result<BootstrapResult, String> {

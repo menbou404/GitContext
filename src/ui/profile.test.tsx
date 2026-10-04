@@ -41,9 +41,10 @@ describe("profiles", () => {
     expect(firstRunSteps([profile], [], {})).toEqual([true, false, false]);
     expect(firstRunSteps([profile], [], { sample: connected })).toEqual([true, true, false]);
     expect(firstRunSteps([profile], [repository], { sample: connected })).toEqual([true, true, true]);
-    const html = renderToStaticMarkup(<FirstRunGuide profiles={[profile]} repositories={[]} statuses={{ sample: connected }} locale="ja" onCreate={() => {}} onConnect={() => {}} onAdd={() => {}} />);
+    const html = renderToStaticMarkup(<FirstRunGuide profiles={[profile]} repositories={[]} statuses={{ sample: connected }} locale="ja" onCreate={() => {}} onConnect={() => {}} onAdd={() => {}} onAi={() => {}} />);
     expect(html.match(/完了/g)).toHaveLength(2);
     expect(html).toContain("リポジトリを追加");
+    expect(html).toContain("AI連携を設定する（任意）");
     expect(html).toContain("ui-button--primary");
   });
 });
