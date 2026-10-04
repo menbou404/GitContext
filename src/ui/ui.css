@@ -31,6 +31,8 @@ html, body, #root { min-width: 1050px; }
 .ui-sidebar button.active { background: var(--ui-surface); box-shadow: 0 0 0 1px var(--ui-line); font-weight: 600; }
 .ui-sidebar button span:nth-child(2) { flex: 1; }
 .ui-sidebar button small { font-size: 12px; color: var(--ui-muted); }
+.ui-sidebar-language { display: flex; flex-direction: column; gap: 5px; margin-top: auto; padding: 12px 10px 2px; border-top: 1px solid var(--ui-line); color: var(--ui-muted); font-size: 12px; }
+.ui-sidebar-language select { width: 100%; min-height: 32px; padding: 4px 8px; border: 1px solid var(--ui-input-line); border-radius: 6px; background: var(--ui-surface); color: var(--ui-muted); font: 13px var(--ui-font); }
 .ui-workspace { flex: 1; min-width: 0; height: 100vh; overflow: auto; }
 .ui-main { padding: 28px 32px 48px; }
 .ui-result { margin: 0 0 18px; color: var(--ui-ready); font-size: 13px; }

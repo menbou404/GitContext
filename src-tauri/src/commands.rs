@@ -13,6 +13,11 @@ pub fn bootstrap(store: State<'_, StateStore>) -> Result<BootstrapResult, String
 }
 
 #[tauri::command]
+pub fn set_locale(store: State<'_, StateStore>, locale: String) -> Result<AppSettings, String> {
+    operations::set_locale(&store, locale)
+}
+
+#[tauri::command]
 pub async fn inspect_repository_statuses(
     store: State<'_, StateStore>,
 ) -> Result<Vec<RepositoryStatus>, String> {

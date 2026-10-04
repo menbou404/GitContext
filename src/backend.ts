@@ -4,6 +4,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { demoBootstrap } from "./demoData";
 import type {
   AppData,
+  AppSettings,
   AutoApprove,
   ApplyPreview,
   BootstrapResult,
@@ -37,15 +38,34 @@ const demoMergedPullRequests = new Set<number>();
 const demoReapplied = new Set<string>();
 
 const inDesktopApp = () => isTauri();
+const demoLocaleKey = "gitcontext.locale";
 
 const nextDemoId = (prefix: string) =>
   `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 
 export async function bootstrap(): Promise<BootstrapResult> {
   if (!inDesktopApp()) {
+    try {
+      demoState.settings = { locale: localStorage.getItem(demoLocaleKey) };
+    } catch {
+      // Browser storage can be unavailable in private or restricted contexts.
+    }
     return { ...structuredClone(demoBootstrap), data: structuredClone(demoState) };
   }
   return invoke<BootstrapResult>("bootstrap");
+}
+
+export async function setLocale(locale: "ja" | "en"): Promise<AppSettings> {
+  if (!inDesktopApp()) {
+    demoState.settings = { locale };
+    try {
+      localStorage.setItem(demoLocaleKey, locale);
+    } catch {
+      // Keep the selection for this preview session when storage is unavailable.
+    }
+    return demoState.settings;
+  }
+  return invoke<AppSettings>("set_locale", { locale });
 }
 
 export async function inspectRepositoryStatuses(): Promise<RepositoryStatus[]> {

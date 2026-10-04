@@ -12,6 +12,7 @@ export const demoBootstrap: BootstrapResult = {
   },
   data: {
     version: 1,
+    settings: { locale: null },
     profiles: [
       {
         id: "open-source",

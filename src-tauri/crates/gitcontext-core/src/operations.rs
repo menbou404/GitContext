@@ -3,11 +3,11 @@ use crate::{
     git_ops,
     github::*,
     models::{
-        normalize_profile, validate_profile, AppData, ApplyPreview, AutoApprove, BootstrapResult,
-        BranchResult, CloneResult, CommitPreview, CommitResult, GhProfileStatus, GithubRepository,
-        MergePullRequestResult, Profile, ProfileAutoApprove, PublishResult, PullRequestManagement,
-        PullRequestPreview, PullRequestResult, PushPreview, PushResult, RepositoryRecord,
-        SyncPreview,
+        normalize_profile, validate_profile, AppData, AppSettings, ApplyPreview, AutoApprove,
+        BootstrapResult, BranchResult, CloneResult, CommitPreview, CommitResult, GhProfileStatus,
+        GithubRepository, MergePullRequestResult, Profile, ProfileAutoApprove, PublishResult,
+        PullRequestManagement, PullRequestPreview, PullRequestResult, PushPreview, PushResult,
+        RepositoryRecord, SyncPreview,
     },
     storage::{development_data, StateStore},
 };
@@ -30,6 +30,18 @@ pub fn bootstrap(store: &StateStore) -> Result<BootstrapResult, String> {
         demo_mode: false,
         development_data: development_data(),
     })
+}
+
+pub fn set_locale(store: &StateStore, locale: String) -> Result<AppSettings, String> {
+    let _guard = store.lock()?;
+    let mut data = store.load()?;
+    if matches!(locale.as_str(), "ja" | "en")
+        && data.settings.locale.as_deref() != Some(locale.as_str())
+    {
+        data.settings.locale = Some(locale);
+        store.save(&data)?;
+    }
+    Ok(data.settings)
 }
 
 pub fn save_profile(store: &StateStore, profile: Profile) -> Result<AppData, String> {

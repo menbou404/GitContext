@@ -4,13 +4,14 @@ import { shellCopy, type Locale } from "../i18n";
 
 export type ShellPage = "repositories" | "profiles";
 
-export function Shell({ page, locale, repositoryCount, notice, noticeLink, onNavigate, onDismiss, children }: {
+export function Shell({ page, locale, repositoryCount, notice, noticeLink, onNavigate, onLocaleChange, onDismiss, children }: {
   page: ShellPage;
   locale: Locale;
   repositoryCount: number;
   notice: string | null;
   noticeLink?: ShellPage | null;
   onNavigate: (page: ShellPage) => void;
+  onLocaleChange: (locale: Locale) => void;
   onDismiss: () => void;
   children: ReactNode;
 }) {
@@ -24,6 +25,13 @@ export function Shell({ page, locale, repositoryCount, notice, noticeLink, onNav
       <button type="button" className={page === "profiles" ? "active" : ""} aria-current={page === "profiles" ? "page" : undefined} onClick={() => onNavigate("profiles")}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c1.2-3.5 4-5 7-5s5.8 1.5 7 5"/></svg> <span>{copy.profiles}</span>
       </button>
+      <div className="ui-sidebar-language">
+        <label htmlFor="ui-locale">{copy.language}</label>
+        <select id="ui-locale" value={locale} onChange={(event) => onLocaleChange(event.target.value as Locale)}>
+          <option value="ja">日本語</option>
+          <option value="en">English</option>
+        </select>
+      </div>
     </nav>
     <div className="ui-workspace">
       {notice && <div className="ui-notice" role="status"><span title={notice}>{notice}</span>{noticeLink && <button type="button" className="ui-notice-link" onClick={() => onNavigate(noticeLink)}>{copy.openProfiles}</button>}<button type="button" onClick={onDismiss} aria-label={locale === "ja" ? "通知を閉じる" : "Dismiss notice"}>×</button></div>}

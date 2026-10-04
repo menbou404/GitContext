@@ -64,6 +64,26 @@ pub struct AppData {
     pub version: u32,
     pub profiles: Vec<Profile>,
     pub repositories: Vec<RepositoryRecord>,
+    #[serde(default)]
+    pub settings: AppSettings,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppSettings {
+    #[serde(default, deserialize_with = "deserialize_locale")]
+    pub locale: Option<String>,
+}
+
+fn deserialize_locale<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(value
+        .as_str()
+        .filter(|locale| matches!(*locale, "ja" | "en"))
+        .map(str::to_owned))
 }
 
 #[cfg(test)]
@@ -108,6 +128,7 @@ impl Default for AppData {
             version: 2,
             profiles: Vec::new(),
             repositories: Vec::new(),
+            settings: AppSettings::default(),
         }
     }
 }
@@ -527,6 +548,7 @@ mod tests {
                 valid_profile(),
             ],
             repositories: Vec::new(),
+            settings: AppSettings::default(),
         };
 
         assert!(migrate_app_data(&mut data));

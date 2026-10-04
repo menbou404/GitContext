@@ -29,6 +29,7 @@ import {
   pushRepository,
   removeRepository,
   saveProfile,
+  setLocale,
   setProfileAutoApprove,
   setRepositoryAutoApprove,
 } from "./backend";
@@ -46,6 +47,7 @@ import type { AppData, ApplyPreview, AutoApprove, BootstrapResult, CloneOptions,
 import type { RepositoryStatus } from "./types";
 import { initials, profileIsComplete } from "./types";
 import { localizeRuntimeMessage, shellCopy, uiCopy, type Locale } from "./i18n";
+import { resolveLocale } from "./locale";
 import { Shell, type ShellPage } from "./ui/Shell";
 import { RepositoryList } from "./ui/RepositoryList";
 import { RepositoryDetail } from "./ui/RepositoryDetail";
@@ -1206,7 +1208,8 @@ function PullRequestManagementDialog({
   );
 }
 
-function App({ locale = "en" }: { locale?: Locale }) {
+function App({ previewLocale }: { previewLocale?: Locale }) {
+  const [locale, updateLocale] = useState<Locale>(() => previewLocale ?? resolveLocale(undefined, navigator.language));
   const copy = uiCopy[locale];
   const [result, setResult] = useState<BootstrapResult | null>(null);
   const [loadingError, setLoadingError] = useState<string | null>(null);
@@ -1237,12 +1240,27 @@ function App({ locale = "en" }: { locale?: Locale }) {
   useEffect(() => {
     bootstrap()
       .then((value) => {
+        updateLocale(previewLocale ?? resolveLocale(value.data.settings?.locale, navigator.language));
         setResult(value);
         setSelectedRepositoryId(null);
         setPendingProfileId(value.data.repositories[0]?.profileId ?? value.data.profiles[0]?.id ?? "");
       })
       .catch((error) => setLoadingError(messageFrom(error, locale)));
-  }, [locale]);
+  }, [previewLocale]);
+
+  const changeLocale = async (nextLocale: Locale) => {
+    if (nextLocale === locale) return;
+    const previousLocale = locale;
+    updateLocale(nextLocale);
+    setNotice(null);
+    setErrorNotice(null);
+    try {
+      await setLocale(nextLocale);
+    } catch (error) {
+      updateLocale(previousLocale);
+      setErrorNotice(messageFrom(error, previousLocale));
+    }
+  };
 
   const data = result?.data;
   const environment = result?.environment;
@@ -1258,7 +1276,7 @@ function App({ locale = "en" }: { locale?: Locale }) {
 
   useEffect(() => {
     if (data) refreshStatuses();
-  }, [data, locale]);
+  }, [data]);
 
   const updateData = (nextData: AppData) => setResult((current) => current ? { ...current, data: nextData } : current);
 
@@ -1572,7 +1590,7 @@ function App({ locale = "en" }: { locale?: Locale }) {
   const visibleNotice = errorNotice || (missingTools && !environmentDismissed ? shellCopy[locale].envMissing(missingTools) : null);
 
   return (
-    <Shell page={page} locale={locale} repositoryCount={data.repositories.length} notice={visibleNotice} noticeLink={!errorNotice && (!environment.gh.available || !environment.ssh.available) ? "profiles" : null} onDismiss={() => { if (errorNotice) setErrorNotice(null); else setEnvironmentDismissed(true); }} onNavigate={(nextPage) => { setPage(nextPage); setSelectedRepositoryId(null); setEditingProfile(null); setPreview(null); setNotice(null); }}>
+    <Shell page={page} locale={locale} repositoryCount={data.repositories.length} notice={visibleNotice} noticeLink={!errorNotice && (!environment.gh.available || !environment.ssh.available) ? "profiles" : null} onDismiss={() => { if (errorNotice) setErrorNotice(null); else setEnvironmentDismissed(true); }} onNavigate={(nextPage) => { setPage(nextPage); setSelectedRepositoryId(null); setEditingProfile(null); setPreview(null); setNotice(null); }} onLocaleChange={changeLocale}>
       {notice && <p className="ui-result" role="status">{notice}</p>}
       {page === "profiles" ? <div className="ui-page">
         <div className="ui-page-heading"><h1>{shellCopy[locale].profiles}</h1><div className="ui-heading-spacer" /><button className="ui-button ui-button--primary" type="button" onClick={() => setEditingProfile({ profile: emptyProfile(), creating: true })}><PlusIcon />{shellCopy[locale].addProfile}</button></div>

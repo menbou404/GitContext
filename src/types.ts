@@ -50,6 +50,11 @@ export interface AppData {
   version: number;
   profiles: Profile[];
   repositories: RepositoryRecord[];
+  settings: AppSettings;
+}
+
+export interface AppSettings {
+  locale?: string | null;
 }
 
 export interface ToolStatus {
