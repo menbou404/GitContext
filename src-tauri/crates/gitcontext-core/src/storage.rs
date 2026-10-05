@@ -639,10 +639,30 @@ mod tests {
         )
         .unwrap();
         assert!(store.load().unwrap().settings.locale.is_none());
+        assert!(
+            !store
+                .load()
+                .unwrap()
+                .settings
+                .ai_integration_notice_dismissed
+        );
 
         let settings = crate::operations::set_locale(&store, "ja".into()).unwrap();
         assert_eq!(settings.locale.as_deref(), Some("ja"));
         assert_eq!(store.load().unwrap().settings.locale.as_deref(), Some("ja"));
+
+        let settings = crate::operations::dismiss_ai_integration_notice(&store).unwrap();
+        assert!(settings.ai_integration_notice_dismissed);
+        assert_eq!(settings.locale.as_deref(), Some("ja"));
+        let saved = fs::read_to_string(store.state_path()).unwrap();
+        assert!(saved.contains("\"aiIntegrationNoticeDismissed\": true"));
+        assert!(
+            store
+                .load()
+                .unwrap()
+                .settings
+                .ai_integration_notice_dismissed
+        );
 
         crate::operations::save_profile(
             &store,

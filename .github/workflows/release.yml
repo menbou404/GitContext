@@ -54,3 +54,4 @@ jobs:
           releaseDraft: true
           prerelease: true
           generateReleaseNotes: true
+          args: --config src-tauri/tauri.release.conf.json

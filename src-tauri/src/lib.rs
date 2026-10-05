@@ -18,6 +18,7 @@ pub fn run() {
             commands::verify_ai_client,
             commands::bootstrap,
             commands::set_locale,
+            commands::dismiss_ai_integration_notice,
             commands::refresh_environment,
             commands::list_backups,
             commands::restore_backup,

@@ -1,0 +1,8 @@
+{
+  "build": {
+    "beforeBuildCommand": "npm run build && node scripts/build-mcp-sidecar.mjs"
+  },
+  "bundle": {
+    "externalBin": ["binaries/gitcontext-mcp"]
+  }
+}

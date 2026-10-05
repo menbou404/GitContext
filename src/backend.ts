@@ -45,6 +45,14 @@ const demoAi: AiInventory = {
   ],
 };
 
+if (typeof window !== "undefined" && !isTauri() && new URLSearchParams(window.location.search).get("demo") === "ai-intro") {
+  for (const client of demoAi.clients) {
+    client.state = "disconnected";
+    client.command = null;
+    client.args = [];
+  }
+}
+
 export async function listAiClients(): Promise<AiInventory> {
   return inDesktopApp() ? invoke<AiInventory>("list_ai_clients") : structuredClone(demoAi);
 }
@@ -108,7 +116,7 @@ const nextDemoId = (prefix: string) =>
 export async function bootstrap(): Promise<BootstrapResult> {
   if (!inDesktopApp()) {
     try {
-      demoState.settings = { locale: localStorage.getItem(demoLocaleKey) };
+      demoState.settings = { ...demoState.settings, locale: localStorage.getItem(demoLocaleKey) };
     } catch {
       // Browser storage can be unavailable in private or restricted contexts.
     }
@@ -119,7 +127,7 @@ export async function bootstrap(): Promise<BootstrapResult> {
 
 export async function setLocale(locale: "ja" | "en"): Promise<AppSettings> {
   if (!inDesktopApp()) {
-    demoState.settings = { locale };
+    demoState.settings = { ...demoState.settings, locale };
     try {
       localStorage.setItem(demoLocaleKey, locale);
     } catch {
@@ -128,6 +136,14 @@ export async function setLocale(locale: "ja" | "en"): Promise<AppSettings> {
     return demoState.settings;
   }
   return invoke<AppSettings>("set_locale", { locale });
+}
+
+export async function dismissAiIntegrationNotice(): Promise<AppSettings> {
+  if (!inDesktopApp()) {
+    demoState.settings = { ...demoState.settings, aiIntegrationNoticeDismissed: true };
+    return demoState.settings;
+  }
+  return invoke<AppSettings>("dismiss_ai_integration_notice");
 }
 
 export async function refreshEnvironment(): Promise<BootstrapResult["environment"]> {
