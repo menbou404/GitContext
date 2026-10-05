@@ -73,6 +73,8 @@ pub struct AppData {
 pub struct AppSettings {
     #[serde(default, deserialize_with = "deserialize_locale")]
     pub locale: Option<String>,
+    #[serde(default)]
+    pub ai_integration_notice_dismissed: bool,
 }
 
 fn deserialize_locale<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>

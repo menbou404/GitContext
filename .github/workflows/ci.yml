@@ -48,6 +48,15 @@ jobs:
       - name: Test Rust backend
         run: cargo test --manifest-path src-tauri/Cargo.toml --workspace
 
+      - name: Build MCP sidecar
+        run: node scripts/build-mcp-sidecar.mjs
+
+      - name: Check MCP sidecar file
+        shell: pwsh
+        run: |
+          $triple = (rustc -vV | Select-String '^host: (.+)$').Matches.Groups[1].Value
+          if (-not (Test-Path "src-tauri/binaries/gitcontext-mcp-$triple.exe")) { throw "MCP sidecar is missing" }
+
   privacy-scan:
     name: Privacy and secret scan
     runs-on: ubuntu-latest

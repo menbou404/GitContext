@@ -6,9 +6,11 @@ import {
   chooseCloneDestinationDirectory,
   chooseRepositoryDirectory,
   cloneGithubRepository,
+  dismissAiIntegrationNotice,
   inspectRepositoryStatuses,
   inspectGithubProfile,
   listGithubRepositories,
+  listAiClients,
   previewAssignment,
   removeRepository,
   saveProfile,
@@ -22,7 +24,7 @@ import {
   CloseIcon,
   SearchIcon,
 } from "./Icons";
-import type { AppData, ApplyPreview, AutoApprove, BootstrapResult, CloneOptions, GhProfileStatus, GithubRepository, Profile } from "./types";
+import type { AiInventory, AppData, ApplyPreview, AutoApprove, BootstrapResult, CloneOptions, GhProfileStatus, GithubRepository, Profile } from "./types";
 import type { RepositoryStatus } from "./types";
 import { initials, profileIsComplete } from "./types";
 import { localizeRuntimeMessage, shellCopy, uiCopy, type Locale } from "./i18n";
@@ -37,6 +39,7 @@ import { FirstRunGuide } from "./ui/FirstRunGuide";
 import { SettingsPage } from "./ui/SettingsPage";
 import { HistoryPage } from "./ui/HistoryPage";
 import { AiIntegrationPage } from "./ui/AiIntegrationPage";
+import { shouldShowAiNotice } from "./ui/aiNotice";
 import { repositoryProfileStatus } from "./ui/profileStatus";
 import "./App.css";
 import "./ui/ui.css";
@@ -266,6 +269,7 @@ function App({ previewLocale }: { previewLocale?: Locale }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [errorNotice, setErrorNotice] = useState<string | null>(null);
   const [environmentDismissed, setEnvironmentDismissed] = useState(false);
+  const [aiInventory, setAiInventory] = useState<AiInventory | null>(null);
   const [statuses, setStatuses] = useState<Record<string, RepositoryStatus>>({});
   const [profileStatuses, setProfileStatuses] = useState<Record<string, GhProfileStatus>>({});
   const [profileRefreshing, setProfileRefreshing] = useState(false);
@@ -314,6 +318,35 @@ function App({ previewLocale }: { previewLocale?: Locale }) {
 
   const data = result?.data;
   const environment = result?.environment;
+  const aiNoticeDismissed = data?.settings.aiIntegrationNoticeDismissed ?? false;
+
+  useEffect(() => {
+    if (!data?.profiles.length || aiNoticeDismissed) return;
+    let active = true;
+    void listAiClients()
+      .then((inventory) => { if (active) setAiInventory(inventory); })
+      .catch(() => { if (active) setAiInventory(null); });
+    return () => { active = false; };
+  }, [Boolean(data?.profiles.length), aiNoticeDismissed]);
+
+  const dismissAiNotice = async () => {
+    try {
+      const settings = await dismissAiIntegrationNotice();
+      setResult((current) => current ? { ...current, data: { ...current.data, settings } } : current);
+    } catch (error) {
+      setErrorNotice(messageFrom(error, locale));
+    }
+  };
+
+  const navigate = (nextPage: ShellPage) => {
+    if (nextPage === "ai" && !aiNoticeDismissed) void dismissAiNotice();
+    if (nextPage === "profiles" && page !== "profiles") checkedProfiles.current.clear();
+    setPage(nextPage);
+    setSelectedRepositoryId(null);
+    setEditingProfile(null);
+    setPreview(null);
+    setNotice(null);
+  };
   const selectedRepository = data?.repositories.find((repo) => repo.id === selectedRepositoryId) ?? null;
   const pendingProfile = data?.profiles.find((profile) => profile.id === pendingProfileId) ?? null;
 
@@ -505,7 +538,9 @@ function App({ previewLocale }: { previewLocale?: Locale }) {
 
   const selectedStatus = selectedRepository ? statuses[selectedRepository.id] : undefined;
   const missingTools = [!environment.git.available && "git", !environment.gh.available && "gh", !environment.ssh.available && "SSH"].filter(Boolean).join(" / ");
-  const visibleNotice = errorNotice || (missingTools && !environmentDismissed ? shellCopy[locale].envMissing(missingTools) : null);
+  const showAiNotice = shouldShowAiNotice(data.profiles.length, aiNoticeDismissed, aiInventory);
+  const visibleNotice = errorNotice || (missingTools && !environmentDismissed ? shellCopy[locale].envMissing(missingTools) : null) || (showAiNotice ? shellCopy[locale].aiIntegrationAvailable : null);
+  const aiNoticeVisible = !errorNotice && (!missingTools || environmentDismissed) && showAiNotice;
   const openProfileEditor = (profile: Profile) => setEditingProfile({ profile, creating: false });
   const createProfile = () => setEditingProfile({ profile: emptyProfile(), creating: true });
   const profileList = <ProfileList profiles={data.profiles} repositories={data.repositories} statuses={currentProfileStatuses} locale={locale} refreshing={profileRefreshing} onRefresh={() => refreshProfileStatuses(true)} onCreate={createProfile} onOpen={openProfileEditor} />;
@@ -513,10 +548,10 @@ function App({ previewLocale }: { previewLocale?: Locale }) {
     onCreate={() => { setPage("profiles"); createProfile(); }}
     onConnect={() => { setPage("profiles"); const profile = data.profiles.find((item) => item.ghConfigDir) ?? data.profiles[0]; if (profile) openProfileEditor(profile); }}
     onAdd={() => { void addRepo().then((added) => { if (added) setPage("repositories"); }); }}
-    onAi={() => setPage("ai")} />;
+    onAi={() => navigate("ai")} />;
 
   return (
-    <Shell page={page} locale={locale} repositoryCount={data.repositories.length} notice={visibleNotice} noticeLink={!errorNotice && (!environment.gh.available || !environment.ssh.available) ? "settings" : null} onDismiss={() => { if (errorNotice) setErrorNotice(null); else setEnvironmentDismissed(true); }} onNavigate={(nextPage) => { if (nextPage === "profiles" && page !== "profiles") checkedProfiles.current.clear(); setPage(nextPage); setSelectedRepositoryId(null); setEditingProfile(null); setPreview(null); setNotice(null); }}>
+    <Shell page={page} locale={locale} repositoryCount={data.repositories.length} notice={visibleNotice} noticeLink={aiNoticeVisible ? "ai" : !errorNotice && missingTools ? "settings" : null} noticeLinkLabel={aiNoticeVisible ? shellCopy[locale].openAiIntegration : undefined} onDismiss={() => { if (errorNotice) setErrorNotice(null); else if (aiNoticeVisible) void dismissAiNotice(); else setEnvironmentDismissed(true); }} onNavigate={navigate}>
       {notice && <p className="ui-result" role="status">{notice}</p>}
       {page === "settings" ? <SettingsPage locale={locale} result={result} onLocaleChange={changeLocale} onEnvironment={(nextEnvironment) => setResult((current) => current ? { ...current, environment: nextEnvironment } : current)} onRestored={(nextResult) => { setResult(nextResult); setSelectedRepositoryId(null); setStatuses({}); setProfileStatuses({}); checkedProfiles.current.clear(); updateLocale(previewLocale ?? resolveLocale(nextResult.data.settings?.locale, navigator.language)); }} />
         : page === "history" ? <HistoryPage data={data} locale={locale} />

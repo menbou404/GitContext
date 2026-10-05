@@ -10,7 +10,8 @@
     "hooks:install": "node scripts/install-git-hooks.mjs",
     "guard:tree": "node scripts/personal-data-guard.mjs --tree --no-denylist",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "tauri:build": "tauri build --config src-tauri/tauri.release.conf.json"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

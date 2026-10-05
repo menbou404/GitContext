@@ -60,6 +60,11 @@ pub fn set_locale(store: State<'_, StateStore>, locale: String) -> Result<AppSet
 }
 
 #[tauri::command]
+pub fn dismiss_ai_integration_notice(store: State<'_, StateStore>) -> Result<AppSettings, String> {
+    operations::dismiss_ai_integration_notice(&store)
+}
+
+#[tauri::command]
 pub fn refresh_environment() -> EnvironmentStatus {
     gitcontext_core::environment::environment_status()
 }

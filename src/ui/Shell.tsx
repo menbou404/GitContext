@@ -4,12 +4,13 @@ import { shellCopy, type Locale } from "../i18n";
 
 export type ShellPage = "repositories" | "profiles" | "ai" | "history" | "settings";
 
-export function Shell({ page, locale, repositoryCount, notice, noticeLink, onNavigate, onDismiss, children }: {
+export function Shell({ page, locale, repositoryCount, notice, noticeLink, noticeLinkLabel, onNavigate, onDismiss, children }: {
   page: ShellPage;
   locale: Locale;
   repositoryCount: number;
   notice: string | null;
   noticeLink?: ShellPage | null;
+  noticeLinkLabel?: string;
   onNavigate: (page: ShellPage) => void;
   onDismiss: () => void;
   children: ReactNode;
@@ -35,7 +36,7 @@ export function Shell({ page, locale, repositoryCount, notice, noticeLink, onNav
       </button>
     </nav>
     <div className="ui-workspace">
-      {notice && <div className="ui-notice" role="status"><span title={notice}>{notice}</span>{noticeLink && <button type="button" className="ui-notice-link" onClick={() => onNavigate(noticeLink)}>{copy.openProfiles}</button>}<button type="button" onClick={onDismiss} aria-label={locale === "ja" ? "通知を閉じる" : "Dismiss notice"}>×</button></div>}
+      {notice && <div className="ui-notice" role="status"><span title={notice}>{notice}</span>{noticeLink && <button type="button" className="ui-notice-link" onClick={() => onNavigate(noticeLink)}>{noticeLinkLabel ?? copy.openProfiles}</button>}<button type="button" onClick={onDismiss} aria-label={locale === "ja" ? "通知を閉じる" : "Dismiss notice"}>×</button></div>}
       <main className="ui-main">{children}</main>
     </div>
   </div>;

@@ -44,6 +44,16 @@ pub fn set_locale(store: &StateStore, locale: String) -> Result<AppSettings, Str
     Ok(data.settings)
 }
 
+pub fn dismiss_ai_integration_notice(store: &StateStore) -> Result<AppSettings, String> {
+    let _guard = store.lock()?;
+    let mut data = store.load()?;
+    if !data.settings.ai_integration_notice_dismissed {
+        data.settings.ai_integration_notice_dismissed = true;
+        store.save(&data)?;
+    }
+    Ok(data.settings)
+}
+
 pub fn save_profile(store: &StateStore, profile: Profile) -> Result<AppData, String> {
     let _guard = store.lock()?;
     let mut profile = normalize_profile(profile);

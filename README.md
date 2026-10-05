@@ -95,6 +95,8 @@ cargo test --manifest-path src-tauri\Cargo.toml --workspace
 npm run tauri dev
 ```
 
+Windows向けのリリース用インストーラーは `npm run tauri:build` で作成します。このビルドは `gitcontext-mcp` のrelease版をサイドカーとしてビルドし、`gitcontext-mcp.exe` をGUIと同じフォルダに同梱します。AIクライアントへの登録は、インストール後に「AI連携」画面から行います。
+
 `npm run hooks:install`は、個人情報や秘密情報のcommitを防ぐGit hookを設定します。詳細は[CONTRIBUTING.md](CONTRIBUTING.md)を参照してください。
 
 ### 開発版のデータ
@@ -105,7 +107,7 @@ Windowsでは、配布版は`%USERPROFILE%\.gitcontext`、`npm run tauri dev`な
 
 状態ファイルには個人のProfileが含まれます。リポジトリ内へコピーしたり、commitしたりしないでください。
 
-### MCPサーバー（開発中）
+### MCPサーバー
 
 GUIの「AI連携」画面からClaude Code、Codex（CLI・Desktop共通）、Claude Desktopへの登録・範囲変更・修復・解除ができます。設定の差分を確認してからバックアップ付きで適用し、接続確認で公開されたツール数を表示します。開発版でサーバーが未ビルドの場合は、`cargo build --manifest-path src-tauri/Cargo.toml -p gitcontext-mcp`を実行してください。
 
@@ -153,6 +155,8 @@ npm run dev
 
 - 英語版: `http://localhost:1420/`
 - 日本語版: `http://localhost:1420/ja.html`
+
+AI連携の案内通知を確認するプレビュー: `http://localhost:1420/?demo=ai-intro`
 
 ## リリースとバージョニング
 
