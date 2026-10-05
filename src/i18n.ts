@@ -1,5 +1,34 @@
 export type Locale = "en" | "ja";
 
+export const aiCopy = {
+  en: {
+    title: "AI integration", lead: "Let AI clients work with Git and GitHub through profiles assigned to repositories.", server: "MCP server", clients: "AI clients", release: "Release", development: "Development", unbuilt: "Not built. Run cargo build -p gitcontext-mcp.",
+    states: { connected: "Connected", repair: "Repair needed", disconnected: "Not connected", not_found: "Not found" },
+    tiers: { read: "Read only", local: "Local changes", remote: "GitHub operations" },
+    tierHelp: { read: "View profiles, repository status, and previews.", local: "Apply profiles, create branches, commit, and pull.", remote: "Push, create and merge Pull Requests, clone, and publish." },
+    confirmation: { mixed: "CLI supported; Code tab unsupported", unstable: "Unstable", unsupported: "Unsupported" },
+    actions: { connect: "Connect", change: "Change scope", repair: "Repair", disconnect: "Disconnect" },
+    scope: "Available scope", clientApproval: "Client approval enabled", recommended: "recommended", name: "Registration name", config: "Configuration file", support: "Confirmation screen", changes: "Configuration change", before: "Before", after: "After", command: "CLI command", copy: "Copy command", copied: "Copied", manual: "Claude CLI was not found. Run this command manually, then refresh.",
+    remoteNote: "AI can change GitHub. Confirmation is requested for each operation.",
+    warning: "This client cannot display GitContext’s confirmation screen. Confirmation before GitHub operations will be left to the client. If automatic approval is enabled in the client, push and merge may run without confirmation.",
+    codeTab: "Claude Code CLI can show GitContext confirmation. The desktop Code tab cannot. Both share this registration. Enable client approval for GitHub operations in the Code tab? The CLI will still use GitContext confirmation.",
+    understand: "I understand", trust: "Allow client approval for the Code tab", review: "Review changes", backup: "The current configuration file will be backed up before writing. Other entries remain unchanged.", apply: "Back up and connect", remove: "Back up and disconnect", cancel: "Cancel", refresh: "Refresh", verify: "Verify connection", verifying: "Checking connection…", verifyFailed: "Registration was saved, but connection verification failed", toolCount: (n: number) => `Connected. ${n} tools available.`, missing: "The registered executable is missing or points elsewhere.", noServer: "Build the MCP server before connecting.", manualLink: "Configure another client manually", manualGuide: "Use this executable and read-only arguments in the client’s MCP settings. See the MCP section of README.md for examples.", error: "Could not complete the operation",
+  },
+  ja: {
+    title: "AI連携", lead: "AIエージェントが、リポジトリに割り当てたプロファイルを通してGitとGitHubを扱えるようにします。", server: "MCPサーバー", clients: "AIクライアント", release: "配布版", development: "開発版", unbuilt: "未ビルドです。cargo build -p gitcontext-mcp を実行してください。",
+    states: { connected: "接続済み", repair: "要修復", disconnected: "未接続", not_found: "見つかりません" },
+    tiers: { read: "読み取りのみ", local: "ローカルの変更まで", remote: "GitHub操作まで" },
+    tierHelp: { read: "プロファイルとリポジトリの状態、各操作のプレビューを参照できます。", local: "プロファイルの適用、ブランチの作成、commit、Pullができます。", remote: "push、Pull Requestの作成とmerge、clone、GitHubへの公開ができます。" },
+    confirmation: { mixed: "CLIは対応、Codeタブは非対応", unstable: "不安定", unsupported: "非対応" },
+    actions: { connect: "接続", change: "範囲を変更", repair: "修復", disconnect: "解除" },
+    scope: "公開する範囲", clientApproval: "クライアントの確認に任せる", recommended: "おすすめ", name: "登録名", config: "設定ファイル", support: "確認画面への対応", changes: "設定ファイルへの変更", before: "変更前", after: "変更後", command: "CLIコマンド", copy: "コマンドをコピー", copied: "コピーしました", manual: "Claude CLIが見つかりません。表示したコマンドを手動で実行し、再読み込みしてください。",
+    remoteNote: "AIがGitHubを変更できるようになります。実行のたびに確認を求めます。",
+    warning: "このクライアントは、GitContextの確認画面を表示できません。GitHub操作の前の確認は、このクライアント自身の確認に任せることになります。クライアントで自動承認を有効にしていると、確認なしにpushやmergeが実行されます。",
+    codeTab: "Claude Code CLIではGitContextの確認画面を表示できます。デスクトップのCodeタブでは表示できません。登録は共通です。CodeタブでGitHub操作を許可する場合はクライアント側の確認に任せます。CLIでは引き続きGitContextの確認画面を使います。",
+    understand: "理解しました", trust: "Codeタブでクライアントの確認に任せる", review: "差分を確認", backup: "書き込む前に、現在の設定ファイルをバックアップします。ほかの項目は変更しません。", apply: "バックアップして接続", remove: "バックアップして解除", cancel: "キャンセル", refresh: "再読み込み", verify: "接続を確認", verifying: "接続を確認中…", verifyFailed: "登録は保存しましたが、接続確認に失敗しました", toolCount: (n: number) => `接続済み。${n}個のツールを利用できます。`, missing: "登録先の実行ファイルが見つからないか、別の場所を指しています。", noServer: "接続前にMCPサーバーをビルドしてください。", manualLink: "一覧にないクライアントを手動で設定する", manualGuide: "クライアントのMCP設定に、次の実行ファイルと読み取り専用の引数を指定してください。例はREADME.mdのMCP節を参照してください。", error: "操作を完了できません",
+  },
+} as const;
+
 export const tabCopy = {
   en: {
     tabList: "Repository sections", changes: "Changes", sync: "Sync", pullRequests: "Pull Request",
@@ -51,7 +80,7 @@ export const tabCopy = {
 
 export const shellCopy = {
   en: {
-    repositories: "Repositories", profiles: "Profiles", profile: "Profile", history: "History", settings: "Settings",
+    repositories: "Repositories", profiles: "Profiles", profile: "Profile", aiIntegration: "AI integration", history: "History", settings: "Settings",
     repositoryCount: (count: number) => `${count} ${count === 1 ? "repository" : "repositories"}`,
     search: "Search repositories", searchPlaceholder: "Search name, path, or profile",
     addRepository: "Add repository", cloneRepository: "Clone from GitHub",
@@ -81,7 +110,7 @@ export const shellCopy = {
     assignmentMismatch: "The local profile assignment differs.",
   },
   ja: {
-    repositories: "リポジトリ", profiles: "プロファイル", profile: "プロファイル", history: "履歴", settings: "設定",
+    repositories: "リポジトリ", profiles: "プロファイル", profile: "プロファイル", aiIntegration: "AI連携", history: "履歴", settings: "設定",
     repositoryCount: (count: number) => `${count}件`,
     search: "リポジトリを検索", searchPlaceholder: "名前・パス・プロファイルで検索",
     addRepository: "リポジトリを追加", cloneRepository: "GitHubからclone",
@@ -170,18 +199,18 @@ export const profileCopy = {
     noAccount: "Not set", connected: "Connected", disconnected: "Not connected", different: "Different account", checking: "Checking…",
     repositoryCount: (count: number) => `${count} ${count === 1 ? "repository" : "repositories"}`, refresh: "Refresh status", refreshing: "Refreshing…", empty: "No profiles yet",
     guideTitle: "Get started", guideLead: "Complete these steps to set up GitContext.",
-    stepProfile: "Create a profile", stepGithub: "Connect to GitHub", stepRepository: "Add a repository",
-    stepHelp: ["Set a name and Git author.", "Connect the profile to your GitHub account.", "Choose a local Git repository."],
-    stepAction: ["Create profile", "Connect to GitHub", "Add repository"], completed: "Completed",
+    stepProfile: "Create a profile", stepGithub: "Connect to GitHub", stepRepository: "Add a repository", stepAi: "Set up AI integration (optional)",
+    stepHelp: ["Set a name and Git author.", "Connect the profile to your GitHub account.", "Choose a local Git repository.", "Connect an AI client to GitContext."],
+    stepAction: ["Create profile", "Connect to GitHub", "Add repository", "Open AI integration"], completed: "Completed",
   },
   ja: {
     create: "プロファイルを作成", name: "名前", account: "GitHubアカウント", connection: "GitHub連携", assigned: "割り当てたリポジトリ",
     noAccount: "未設定", connected: "接続済み", disconnected: "未接続", different: "別のアカウント", checking: "確認中…",
     repositoryCount: (count: number) => `${count}件`, refresh: "状態を更新", refreshing: "更新中…", empty: "プロファイルがありません",
     guideTitle: "はじめに", guideLead: "次の手順でGitContextを使い始められます。",
-    stepProfile: "プロファイルを作る", stepGithub: "GitHubと連携する", stepRepository: "リポジトリを追加する",
-    stepHelp: ["名前とGit作成者を設定します。", "プロファイルをGitHubアカウントに接続します。", "ローカルのGitリポジトリを選びます。"],
-    stepAction: ["プロファイルを作成", "GitHubと連携", "リポジトリを追加"], completed: "完了",
+    stepProfile: "プロファイルを作る", stepGithub: "GitHubと連携する", stepRepository: "リポジトリを追加する", stepAi: "AI連携を設定する（任意）",
+    stepHelp: ["名前とGit作成者を設定します。", "プロファイルをGitHubアカウントに接続します。", "ローカルのGitリポジトリを選びます。", "AIクライアントをGitContextに接続します。"],
+    stepAction: ["プロファイルを作成", "GitHubと連携", "リポジトリを追加", "AI連携を開く"], completed: "完了",
   },
 } as const;
 

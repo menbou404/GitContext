@@ -12,6 +12,10 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::list_ai_clients,
+            commands::plan_ai_client,
+            commands::apply_ai_client,
+            commands::verify_ai_client,
             commands::bootstrap,
             commands::set_locale,
             commands::refresh_environment,

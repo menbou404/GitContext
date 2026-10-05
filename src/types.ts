@@ -304,6 +304,14 @@ export interface ApplyPreview {
 
 export interface ProfileDraft extends Profile {}
 
+export type AiClient = "claude_code" | "codex" | "claude_desktop";
+export type AiTier = "read" | "local" | "remote";
+export type AiAction = "connect" | "change" | "repair" | "disconnect";
+export interface AiServer { path: string; version: string | null; development: boolean; built: boolean; registrationName: string }
+export interface AiClientInfo { client: AiClient; state: "connected" | "repair" | "disconnected" | "not_found"; tier: AiTier; trust: boolean; confirmation: "mixed" | "unstable" | "unsupported"; configPath: string; registrationName: string; command: string | null; args: string[]; cliAvailable: boolean }
+export interface AiInventory { server: AiServer; clients: AiClientInfo[] }
+export interface AiPlan { client: AiClient; action: AiAction; tier: AiTier; trust: boolean; configPath: string; before: string; after: string; commandLine: string | null; fileHash: string | null; registrationName: string; manual: boolean }
+
 export const profileIsComplete = (profile: Profile) =>
   profile.gitName.trim().length > 0 && profile.gitEmail.trim().length > 0;
 

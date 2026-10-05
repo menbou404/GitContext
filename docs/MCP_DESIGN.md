@@ -199,7 +199,7 @@ MRTRの`requestState`はサーバー側の確認待ちを指す不透明なラ�
 - クライアント名とelicitation対応はリクエストごとに判定する。モダンプロトコルでは各リクエストの`_meta`にある`io.modelcontextprotocol/clientInfo`と`io.modelcontextprotocol/clientCapabilities`を使い、レガシープロトコルでは`initialize`の情報にフォールバックする。監査ログのクライアント名にも同じ情報を使う。
 - **不安定な一覧**: 対応を宣言しながら確認フォームを表示しないことが分かっているクライアントを、当該リクエストの`clientInfo.name`で判定する一覧。サーバーには区別がつかない「自動の拒否」を人の拒否と取り違えないためのもので、アプリの更新に合わせて見直す。
 - Claude CodeのデスクトップCodeタブが起動したサーバープロセスに空でない`CLAUDE_CODE_DESKTOP_APP_VERSION`がある場合は、起動時に一度判定して不安定なクライアントと同じ扱いにする。CLIとCodeタブは`clientInfo.name`が同じため名前だけでは区別できない。この環境変数は非公開仕様なので補助的な判定であり、応答時間による検出も併用する。
-- `--trust-client-approval`は、GUIの「AI連携」画面で、確認画面を出せないクライアントに「GitHub操作まで」を選び、警告に同意したときだけ登録時に付ける（[UI_DESIGN.md](UI_DESIGN.md)参照）。画面ができるまでは手で付ける。
+- `--trust-client-approval`は、GUIの「AI連携」画面で、確認画面を出せないクライアントに「GitHub操作まで」を選び、警告に同意したときだけ登録時に付ける（[UI_DESIGN.md](UI_DESIGN.md)参照）。
 - どの方法でも、プレビューIDの照合は必ず行う。
 - 監査ログには、確認の方法（`elicitation`／`client`／`auto`）と結果を記録する。クライアントに任せた場合と自動承認した場合は、実行結果にもその旨を含める。
 
@@ -289,6 +289,29 @@ command = 'C:\Program Files\GitContext\gitcontext-mcp.exe'
 args = ["--max-tier", "remote"]
 ```
 
+### AI連携画面での登録
+
+GUIの「AI連携」画面（[UI_DESIGN.md](UI_DESIGN.md)）は、次のように各クライアントの設定を読み書きする。
+
+| クライアント | 設定ファイル | 書き込み方法 |
+|---|---|---|
+| Claude Code（CLIとCodeタブで共通） | `~/.claude.json`のユーザー設定 | 公式CLI（`claude mcp add --scope user` / `claude mcp remove --scope user`）。CLIは`PATH`か`%USERPROFILE%\.local\bin\claude.exe`から探す。見つからない場合は実行するコマンドを表示し、利用者に実行してもらう。`~/.claude.json`は実行中のClaude Codeも書き込むため、GitContextは直接書き換えない（読み取りだけ） |
+| Codex CLI / Codex Desktop | `~/.codex/config.toml` | 書式を保ったままTOMLを編集し、`[mcp_servers.<登録名>]`だけを追加・変更・削除する |
+| Claude Desktop | `claude_desktop_config.json` | JSONのキーの順序を保ったまま、`mcpServers.<登録名>`だけを追加・変更・削除する |
+
+- Claude Desktopはパッケージアプリのため、実際に読む設定は`%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude\claude_desktop_config.json`にあることが多い。このファイルがあればそちらを、なければ`%APPDATA%\Claude\claude_desktop_config.json`を使う。
+- 登録名は配布版が`gitcontext`、開発版が`gitcontext-dev`。ほかの登録には触れない。
+- 実行ファイルは、配布版はGUIと同じフォルダの`gitcontext-mcp.exe`、開発版はワークスペースの`target\debug\gitcontext-mcp.exe`を使う。
+- 状態の判定:
+  - **接続済み**: 登録があり、登録の実行ファイルが現在の`gitcontext-mcp.exe`と一致し、存在する。
+  - **要修復**: 登録はあるが、実行ファイルが存在しない、または別の場所を指している。
+  - **未接続**: 登録がない。
+  - 公開する範囲（`--max-tier`）と`--trust-client-approval`の有無は、登録の引数から読み取って表示する。
+- 書き込みの前に、対象の設定ファイルを状態ディレクトリの`backups\ai-clients\`へ日時付きでコピーし、追加・変更・削除する項目の前後を画面に表示する。CLIを使う場合は、実行するコマンドを表示する。
+- 書き込みの後に設定を読み直し、登録が意図どおりかを確認する。「接続を確認」では、登録された実行ファイルと引数でサーバーを起動し、`initialize`と`tools/list`が応答するか（10秒以内）を確かめ、公開されたツールの数を表示する。
+- 確認画面への対応は、上記「クライアントの対応状況」に合わせて表示する。Claude CodeはCLIが対応、Codeタブが非対応で登録が共通のため、「GitHub操作まで」を選ぶと、Codeタブでは確認画面が出ないことと`--trust-client-approval`の意味を説明する。
+- MCPには、登録を変更するツールを用意しない。
+
 ### Tierの選び方
 
 - まずは既定の`read`で使い始め、必要になったら`local`、`remote`へ広げることを推奨する。
@@ -331,7 +354,7 @@ args = ["--max-tier", "remote"]
 | 2 | `gitcontext-mcp`の`read`ツール | 4つのクライアントから状態とプレビューを取得できる | 実装済み。stdioの結合テストと実データでの動作を確認。各クライアントからの接続確認は未実施 |
 | 3 | プレビューID、監査ログ、`local`ツール | 拒否ケースのテストが通る | 実装済み。`pull`の既知の制限あり（上記） |
 | 4 | elicitationによる確認と`remote`ツール | GUIと同じ検証を通り、確認の各ケースのテストが通る | 実装済み。実際のクライアントでの確認画面の動作と、不安定な一覧の中身は未確認 |
-| 5 | インストーラーへの同梱、GUIの「AI連携」画面、README（クライアント別の設定例） | 配布物から設定できる | 未着手 |
+| 5 | インストーラーへの同梱、GUIの「AI連携」画面、README（クライアント別の設定例） | 配布物から設定できる | AI連携画面は実装済み。インストーラーへの同梱は未着手 |
 
 各段階を1つのPRとする。
 

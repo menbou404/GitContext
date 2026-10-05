@@ -3,6 +3,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { demoBootstrap } from "./demoData";
 import type {
+  AiAction, AiClient, AiInventory, AiPlan, AiTier,
   AppData,
   AuditEntry,
   BackupEntry,
@@ -34,6 +35,49 @@ import type {
   RepositoryRecord,
   RepositoryStatus,
 } from "./types";
+
+const demoAi: AiInventory = {
+  server: { path: "C:\\Demo\\GitContext\\gitcontext-mcp.exe", version: "gitcontext-mcp 0.1.0-beta.1", development: false, built: true, registrationName: "gitcontext" },
+  clients: [
+    { client: "claude_code", state: "connected", tier: "read", trust: false, confirmation: "mixed", configPath: "C:\\Demo\\.claude.json", registrationName: "gitcontext", command: "C:\\Demo\\GitContext\\gitcontext-mcp.exe", args: ["--max-tier", "read"], cliAvailable: true },
+    { client: "codex", state: "disconnected", tier: "read", trust: false, confirmation: "unstable", configPath: "C:\\Demo\\.codex\\config.toml", registrationName: "gitcontext", command: null, args: [], cliAvailable: true },
+    { client: "claude_desktop", state: "repair", tier: "read", trust: false, confirmation: "unsupported", configPath: "C:\\Demo\\Claude\\claude_desktop_config.json", registrationName: "gitcontext", command: "C:\\Old\\gitcontext-mcp.exe", args: ["--max-tier", "read"], cliAvailable: false },
+  ],
+};
+
+export async function listAiClients(): Promise<AiInventory> {
+  return inDesktopApp() ? invoke<AiInventory>("list_ai_clients") : structuredClone(demoAi);
+}
+export async function planAiClient(client: AiClient, action: AiAction, tier: AiTier, trust: boolean): Promise<AiPlan> {
+  if (inDesktopApp()) return invoke<AiPlan>("plan_ai_client", { client, action, tier, trust });
+  if (trust && tier !== "remote") throw new Error("Trust requires remote access.");
+  const info = demoAi.clients.find((item) => item.client === client)!;
+  const args = ["--max-tier", tier, ...(trust ? ["--trust-client-approval"] : [])];
+  const render = (command: string, entryArgs: string[]) => client === "codex"
+    ? `[mcp_servers.${info.registrationName}]
+command = '${command}'
+args = [${entryArgs.map((arg) => `"${arg}"`).join(", ")}]`
+    : JSON.stringify({ command, args: entryArgs }, null, 2);
+  const after = action === "disconnect" ? "" : render(demoAi.server.path, args);
+  return { client, action, tier, trust, configPath: info.configPath, before: info.command ? render(info.command, info.args) : "", after,
+    commandLine: client === "claude_code" ? action === "disconnect" ? "claude mcp remove --scope user gitcontext" : `claude mcp add --scope user gitcontext -- "${demoAi.server.path}" ${args.join(" ")}` : null,
+    fileHash: null, registrationName: "gitcontext", manual: client === "claude_code" && !info.cliAvailable };
+}
+export async function applyAiClient(plan: AiPlan): Promise<string | null> {
+  if (inDesktopApp()) return invoke<string | null>("apply_ai_client", { plan });
+  const info = demoAi.clients.find((item) => item.client === plan.client)!;
+  info.state = plan.action === "disconnect" ? "disconnected" : "connected";
+  info.command = plan.action === "disconnect" ? null : demoAi.server.path;
+  info.args = plan.action === "disconnect" ? [] : ["--max-tier", plan.tier, ...(plan.trust ? ["--trust-client-approval"] : [])];
+  info.tier = plan.action === "disconnect" ? "read" : plan.tier;
+  info.trust = plan.action !== "disconnect" && plan.trust;
+  return "C:\\Demo\\GitContext\\backups\\ai-clients\\demo.json";
+}
+export async function verifyAiClient(client: AiClient): Promise<number> {
+  if (inDesktopApp()) return invoke<number>("verify_ai_client", { client });
+  if (demoAi.clients.find((item) => item.client === client)?.state !== "connected") throw new Error("Client is not connected.");
+  return 12;
+}
 
 let demoState: AppData = typeof window !== "undefined" && !isTauri() && new URLSearchParams(window.location.search).get("demo") === "empty"
   ? { ...structuredClone(demoBootstrap.data), profiles: [], repositories: [] }
