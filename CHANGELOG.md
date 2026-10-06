@@ -36,6 +36,7 @@
 
 ### Fixed
 
+- macOSとLinuxで、ブラウザでGitHubのアクセスを許可した後に「GitHub CLIのログインが完了しませんでした」となり、プロファイルのGitHub連携が保存されない問題。ワンタイムコードを読んだ後もGitHub CLIの出力を最後まで読むようにした
 - Tauri WebViewで`window.confirm`が表示されないまま設定や削除が進む問題。自動承認はチェック時に保存し、GitContextからの削除は画面内に「削除する／やめる」の確認を表示
 - MCPの即時自動応答を人の拒否・承認と区別して拒否し、監査ログにも記録。Claude CodeのデスクトップCodeタブを補助的に検出して確認画面を出さずに拒否し、`--trust-client-approval`指定時も対応クライアントではGitContextの確認画面を優先
 - MCPのクライアント情報とelicitation対応をリクエストごとに判定し、モダンプロトコルの`_meta`とMRTRによる確認に対応。レガシーの`elicitation/create`も維持
