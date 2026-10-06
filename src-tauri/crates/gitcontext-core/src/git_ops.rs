@@ -971,11 +971,7 @@ fn output_text(output: &Output) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        fs,
-        path::PathBuf,
-        time::{SystemTime, UNIX_EPOCH},
-    };
+    use std::{fs, path::PathBuf};
 
     use super::{
         apply_profile, build_commit_preview, build_preview, commit_all_changes,
@@ -987,11 +983,8 @@ mod tests {
     use crate::models::{ConfigChange, Profile, RepositoryRecord};
 
     fn apply_test_repository() -> (PathBuf, RepositoryRecord, Profile) {
-        let suffix = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!("git-context-apply-test-{suffix}"));
+        let root =
+            std::env::temp_dir().join(format!("git-context-apply-test-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&root).unwrap();
         assert!(run_git(&root, &["init"]).unwrap().status.success());
         let repository = RepositoryRecord {
@@ -1339,11 +1332,8 @@ mod tests {
 
     #[test]
     fn commits_all_changes_on_the_current_branch() {
-        let suffix = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!("git-context-commit-test-{suffix}"));
+        let root =
+            std::env::temp_dir().join(format!("git-context-commit-test-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&root).unwrap();
         run_git(&root, &["init", "--initial-branch=main"]).unwrap();
         run_git(&root, &["config", "--local", "user.name", "Test User"]).unwrap();

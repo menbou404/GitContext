@@ -933,17 +933,15 @@ mod tests {
     #[test]
     fn packaged_path_is_next_to_gui_and_development_uses_workspace_target() {
         let (root, _) = fixture();
+        let mcp = format!("gitcontext-mcp{}", std::env::consts::EXE_SUFFIX);
         let release = resolve_server(&root.join("app/gitcontext.exe"), false);
-        assert_eq!(release.path, root.join("app/gitcontext-mcp.exe"));
+        assert_eq!(release.path, root.join("app").join(&mcp));
         put(&release.path, "sidecar");
         assert!(resolve_server(&root.join("app/gitcontext.exe"), false).built);
         fs::create_dir_all(root.join("src-tauri/crates")).unwrap();
         put(&root.join("src-tauri/Cargo.toml"), "[workspace]\n");
         let dev = resolve_server(&root.join("src-tauri/target/debug/gitcontext.exe"), true);
-        assert_eq!(
-            dev.path,
-            root.join("src-tauri/target/debug/gitcontext-mcp.exe")
-        );
+        assert_eq!(dev.path, root.join("src-tauri/target/debug").join(&mcp));
     }
 
     #[test]
