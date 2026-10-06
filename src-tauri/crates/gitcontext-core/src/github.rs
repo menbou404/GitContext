@@ -444,24 +444,30 @@ pub(crate) fn spawn_github_auth_reader<R: Read + Send + 'static>(
     prompt_sent: Arc<AtomicBool>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
-        for line in BufReader::new(stream).lines().map_while(Result::ok) {
-            let Some(code) = extract_github_device_code(&line) else {
-                continue;
-            };
+        read_github_auth_output(stream, |code| {
             if prompt_sent.swap(true, Ordering::SeqCst) {
-                continue;
+                return;
             }
 
             let prompt = GithubAuthPrompt {
-                profile_id,
+                profile_id: profile_id.clone(),
                 code,
                 verification_url: GITHUB_DEVICE_URL,
             };
             on_prompt(prompt);
             let _ = open_github_device_page();
-            break;
-        }
+        });
     })
+}
+
+// Read to the end: gh keeps writing after the code, and on macOS and Linux a closed
+// pipe kills it with SIGPIPE before it saves the login.
+fn read_github_auth_output<R: Read>(stream: R, mut on_code: impl FnMut(String)) {
+    for line in BufReader::new(stream).split(b'\n').map_while(Result::ok) {
+        if let Some(code) = extract_github_device_code(&String::from_utf8_lossy(&line)) {
+            on_code(code);
+        }
+    }
 }
 
 pub(crate) fn extract_github_device_code(line: &str) -> Option<String> {
@@ -560,10 +566,11 @@ pub(crate) fn inspect_gh_directory(directory: &Path) -> GhProfileStatus {
 #[cfg(test)]
 mod tests {
     use super::{
-        check_bucket, extract_github_device_code, validate_github_repository_name,
-        validate_github_ssh_url, validate_pull_request_body, validate_pull_request_for_merge,
-        validate_pull_request_title, GithubPullRequest,
+        check_bucket, extract_github_device_code, read_github_auth_output,
+        validate_github_repository_name, validate_github_ssh_url, validate_pull_request_body,
+        validate_pull_request_for_merge, validate_pull_request_title, GithubPullRequest,
     };
+    use std::io::{Cursor, Read};
 
     #[test]
     fn extracts_github_device_code_without_logging_the_line() {
@@ -572,6 +579,28 @@ mod tests {
             Some("B13B-F49A".into())
         );
         assert_eq!(extract_github_device_code("authentication failed"), None);
+    }
+
+    #[test]
+    fn reads_github_auth_output_to_the_end_after_the_code() {
+        struct ByteByByte(Cursor<Vec<u8>>);
+        impl Read for ByteByByte {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                let end = buf.len().min(1);
+                self.0.read(&mut buf[..end])
+            }
+        }
+
+        let output = b"! One-time code (B13B-F49A) copied to clipboard\n\xff\n\
+            ! One-time code (B13B-F49A) copied to clipboard\n\
+            Authentication complete.\n"
+            .to_vec();
+        let length = output.len() as u64;
+        let mut stream = ByteByByte(Cursor::new(output));
+        let mut codes = Vec::new();
+        read_github_auth_output(&mut stream, |code| codes.push(code));
+        assert_eq!(codes, ["B13B-F49A", "B13B-F49A"]);
+        assert_eq!(stream.0.position(), length);
     }
 
     #[test]

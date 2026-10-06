@@ -4,7 +4,7 @@ use std::{
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
     process::{Child, ChildStdin, ChildStdout, Command, Stdio},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::Duration,
 };
 
 struct Fixture {
@@ -13,14 +13,8 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Self {
-        let nonce = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!(
-            "gitcontext-mcp-test-{}-{nonce}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("gitcontext-mcp-test-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&root).unwrap();
         Self { root }
     }
