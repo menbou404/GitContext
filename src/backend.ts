@@ -40,7 +40,7 @@ const demoAi: AiInventory = {
   server: { path: "C:\\Demo\\GitContext\\gitcontext-mcp.exe", version: "gitcontext-mcp 0.1.0-beta.1", development: false, built: true, registrationName: "gitcontext" },
   clients: [
     { client: "claude_code", state: "connected", tier: "read", trust: false, confirmation: "mixed", configPath: "C:\\Demo\\.claude.json", registrationName: "gitcontext", command: "C:\\Demo\\GitContext\\gitcontext-mcp.exe", args: ["--max-tier", "read"], cliAvailable: true },
-    { client: "codex", state: "disconnected", tier: "read", trust: false, confirmation: "unstable", configPath: "C:\\Demo\\.codex\\config.toml", registrationName: "gitcontext", command: null, args: [], cliAvailable: true },
+    { client: "codex", state: "disconnected", tier: "read", trust: false, confirmation: "unsupported", configPath: "C:\\Demo\\.codex\\config.toml", registrationName: "gitcontext", command: null, args: [], cliAvailable: true },
     { client: "claude_desktop", state: "repair", tier: "read", trust: false, confirmation: "unsupported", configPath: "C:\\Demo\\Claude\\claude_desktop_config.json", registrationName: "gitcontext", command: "C:\\Old\\gitcontext-mcp.exe", args: ["--max-tier", "read"], cliAvailable: false },
   ],
 };
