@@ -180,7 +180,8 @@ MRTRの`requestState`はサーバー側の確認待ちを指す不透明なラ�
 | Claude Code（CLI） | 対応。2.1.288の対話セッションで実機確認済み（モダンプロトコル、MRTRで確認フォームが表示され、承認・拒否とも正しく届く）。同じセッション内でツール処理中に送る`elicitation/create`には応答しない |
 | Claude Code（デスクトップのCodeタブ） | 2026-10に実機確認: 内蔵2.1.281、確認依頼を表示せず約4ミリ秒で自動的に拒否を返す |
 | Codex Desktop | 確認フォームが表示されずに閉じられるという報告がある |
-| Codex CLI | 対応が進行中。自動で拒否を返す場合があるという報告がある。0.158.0で、AI連携画面から登録した`read`の接続とツール呼び出し（`list_repositories`）を実機確認済み（2026-10）。確認画面は未確認 |
+| Codex CLI | 0.158.0で、AI連携画面から登録した`read`の接続とツール呼び出し（`list_repositories`）を実機確認済み（2026-10）。`codex exec`では、`remote`のツールはCodex自身の承認が必要なため、承認方針`never`では呼び出し前に止まる |
+| Codex（対話、0.157.1） | 2026-10に実機確認: `clientInfo.name`は`codex-mcp-client`、レガシープロトコルでフォーム形式の確認に対応すると宣言するが、`elicitation/create`を表示せず約1ミリ秒で`cancel`を返す。Codex自身のツール承認は表示される。不安定な一覧に入れた |
 | Claude Desktop | 非対応 |
 | Claude Cowork | 対応を宣言するが確認依頼を無視し、呼び出しが止まるという報告がある |
 
@@ -354,7 +355,7 @@ GUIの「AI連携」画面（[UI_DESIGN.md](UI_DESIGN.md)）は、次のよう�
 | 1 | `gitcontext-core`の切り出し、保存先の解決、プロセス間ロック | 動作を変えずに既存テストが通る。GUIの挙動が変わらない | 完了 |
 | 2 | `gitcontext-mcp`の`read`ツール | 4つのクライアントから状態とプレビューを取得できる | 実装済み。stdioの結合テストと実データでの動作を確認。Claude Code（CLIとCodeタブ）とCodex CLIからの接続を確認済み。Claude Desktop、Codex Desktopは未確認 |
 | 3 | プレビューID、監査ログ、`local`ツール | 拒否ケースのテストが通る | 実装済み。`pull`の既知の制限あり（上記） |
-| 4 | elicitationによる確認と`remote`ツール | GUIと同じ検証を通り、確認の各ケースのテストが通る | 実装済み。実際のクライアントでの確認画面の動作と、不安定な一覧の中身は未確認 |
+| 4 | elicitationによる確認と`remote`ツール | GUIと同じ検証を通り、確認の各ケースのテストが通る | 実装済み。Claude Code（CLIは表示、Codeタブは自動で拒否）とCodex（自動でキャンセル）で確認画面の動作を確認。不安定な一覧は`codex-mcp-client` |
 | 5 | インストーラーへの同梱、GUIの「AI連携」画面、README（クライアント別の設定例） | 配布物から設定できる | 実装済み。サイドカービルド、AI連携画面、更新利用者への一度限りの案内を追加。実際の配布物での動作確認は未実施 |
 
 各段階を1つのPRとする。
@@ -369,4 +370,4 @@ GUIの「AI連携」画面（[UI_DESIGN.md](UI_DESIGN.md)）は、次のよう�
 
 ## 未決事項
 
-- **不安定な一覧の中身:** 各クライアントの`clientInfo.name`と実際の動作を確認し、一覧と「クライアントの対応状況」の表を更新する。
+- **不安定な一覧の中身:** 現在は`codex-mcp-client`。Claude Desktop、Codex Desktopの動作を確認し、一覧と「クライアントの対応状況」の表を更新する。

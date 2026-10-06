@@ -60,7 +60,9 @@ struct ClientInfo {
 }
 
 // Add a client name here if it advertises elicitation but fails to show the prompt.
-const UNRELIABLE_ELICITATION_CLIENTS: &[&str] = &[];
+// Codex 0.157.1 declares form elicitation but answers "cancel" within a millisecond
+// without showing anything (checked 2026-10).
+const UNRELIABLE_ELICITATION_CLIENTS: &[&str] = &["codex-mcp-client"];
 const MIN_HUMAN_RESPONSE: Duration = Duration::from_secs(1);
 const AUTOMATIC_DECLINE: &str = "The client declined without showing GitContext's confirmation prompt. GitHub operations need a client that can show it. Review the AI integration settings in GitContext.";
 const AUTOMATIC_APPROVAL: &str = "The client approved too quickly for a person to have reviewed the confirmation. The operation was not run. Review the AI integration settings in GitContext.";
@@ -1956,6 +1958,10 @@ mod remote_tests {
         }
         assert!(unreliable_client("FictionalClient", &["fictionalclient"]));
         assert!(!unreliable_client("AnotherClient", &["fictionalclient"]));
+        assert!(unreliable_client(
+            "codex-mcp-client",
+            UNRELIABLE_ELICITATION_CLIENTS
+        ));
     }
 
     #[test]

@@ -32,7 +32,7 @@ impl Client {
     fn confirmation(self) -> &'static str {
         match self {
             Self::ClaudeCode => "mixed",
-            Self::Codex => "unstable",
+            Self::Codex => "unsupported",
             Self::ClaudeDesktop => "unsupported",
         }
     }
