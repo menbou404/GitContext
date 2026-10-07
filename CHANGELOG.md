@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### Planned
+
+- 適用履歴からのワンクリックrollback
+- リポジトリrootの一括scan
+- Claude Desktop（チャット）でのMCPの利用
+- AI連携画面での、開発版MCPサーバーの実行ファイルの鮮度の表示
+- pullを、プレビューで確認した上流のcommitに固定する
+
+## [0.2.0-beta.1] - 2026-10-07
+
 ### Added
 - MCP段階5: リリース用インストーラーに `gitcontext-mcp.exe` をサイドカーとして同梱。既存の利用者には、AI連携画面への案内を条件付きで一度だけ表示。
 - UI-6: AI連携画面にMCPサーバー情報とクライアントの検出・接続・範囲変更・修復・解除を追加。差分確認、設定ファイルのバックアップ、接続確認、Claude Code公式CLIを使う登録に対応。
@@ -42,12 +52,6 @@
 - MCPの即時自動応答を人の拒否・承認と区別して拒否し、監査ログにも記録。Claude CodeのデスクトップCodeタブを補助的に検出して確認画面を出さずに拒否し、`--trust-client-approval`指定時も対応クライアントではGitContextの確認画面を優先
 - MCPのクライアント情報とelicitation対応をリクエストごとに判定し、モダンプロトコルの`_meta`とMRTRによる確認に対応。レガシーの`elicitation/create`も維持
 - Profileから外したGitHubユーザー名・gh設定ディレクトリ・SSH鍵の設定が、再適用後もリポジトリのローカル設定に残る問題（適用前のプレビューに「削除」と表示し、GitContextが書いた`core.sshCommand`だけを削除）
-
-### Planned
-
-- 適用履歴とワンクリックrollback
-- GitContext経由のGitHub操作
-- リポジトリrootの一括scan
 
 ## [0.1.0-beta.1] - 2026-08-29
 
