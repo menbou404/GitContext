@@ -363,7 +363,7 @@ GUIの「AI連携」画面（[UI_DESIGN.md](UI_DESIGN.md)）は、次のよう�
 ## 決定事項
 
 - **対象クライアント:** 特定のクライアントに依存せず、Claude Code、Codex CLI、Claude Desktop、Codex Desktopを想定する。
-- **GUIでの承認:** 行わない。MCPサーバー単体で動作させ、人の確認はelicitationで行う。
+- **GUIでの承認:** 基本はelicitationで行い、MCPサーバー単体でも動作させる。確認画面を出せないクライアントに限り、GitContextが常駐している場合はGitContextの画面で確認する（2026年10月に変更。当初は「行わない」。[BACKGROUND_DESIGN.md](BACKGROUND_DESIGN.md)）。
 - **`previewId`の保存先:** サーバープロセスのメモリとする。
 - **`remote`の範囲:** push、PR作成、merge、clone、GitHub公開をすべて提供する。ただし`--max-tier remote`を明示して起動した場合だけ公開する。
 - **確認画面を出せないクライアント:** 既定では`remote`を実行しない。警告に同意したうえで`--trust-client-approval`を付けた場合だけ、クライアント自身の確認に任せる（2026年10月決定。当初案の「既定でクライアントの確認に任せ、`--require-confirmation`で拒否する」から変更）。
@@ -372,4 +372,4 @@ GUIの「AI連携」画面（[UI_DESIGN.md](UI_DESIGN.md)）は、次のよう�
 
 - **不安定な一覧の中身:** 現在は`codex-mcp-client`（Codex CLIとCodex Desktopで共通）。クライアントの更新に合わせて見直す。
 - **Claude Desktop（チャット）での利用:** 接続と確認画面の動作を確認し、必要なら対応する（将来の課題）。
-- **開発版の実行ファイルの鮮度:** 開発版の登録は`targetdebuggitcontext-mcp.exe`を指すが、使用中のファイルはビルドで上書きされないため、古い版が残ることがある（2026-10にCodex Desktopで、保存先を移す前の版が空のデータを返した）。AI連携画面に実行ファイルのビルド日時を表示し、古い場合はビルドし直すよう案内することを検討する。
+- **開発版の実行ファイルの鮮度:** 開発版の登録は`target\debug\gitcontext-mcp.exe`を指すが、使用中のファイルはビルドで上書きされないため、古い版が残ることがある（2026-10にCodex Desktopで、保存先を移す前の版が空のデータを返した）。AI連携画面に実行ファイルのビルド日時を表示し、古い場合はビルドし直すよう案内することを検討する。
