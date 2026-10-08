@@ -166,7 +166,9 @@ export const historyCopy = {
 
 export const settingsCopy = {
   en: {
-    title: "Settings", environment: "Environment", language: "Language", data: "Data",
+    title: "Settings", environment: "Environment", language: "Language", resident: "Background", data: "Data",
+    closeToTray: "Keep GitContext in the notification area when closing the window",
+    autostart: "Start when signing in to Windows",
     git: "Git", gh: "GitHub CLI", ssh: "SSH", found: "Available", missing: "Not found",
     gitMissing: "Git was not found. Install Git and restart GitContext.",
     ghMissing: "GitHub CLI was not found. Install it and restart GitContext.",
@@ -181,7 +183,9 @@ export const settingsCopy = {
     demoRestore: "Preview only: this backup would be restored.", demoFolder: "Preview only: no local folder is opened.",
   },
   ja: {
-    title: "設定", environment: "環境", language: "言語", data: "データ",
+    title: "設定", environment: "環境", language: "言語", resident: "常駐", data: "データ",
+    closeToTray: "ウィンドウを閉じても通知領域に残す",
+    autostart: "Windowsへのサインイン時に起動する",
     git: "Git", gh: "GitHub CLI", ssh: "SSH", found: "利用できます", missing: "見つかりません",
     gitMissing: "Gitが見つかりません。インストールしてGitContextを再起動してください。",
     ghMissing: "GitHub CLIが見つかりません。インストールしてGitContextを再起動してください。",

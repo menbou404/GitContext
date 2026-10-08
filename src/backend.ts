@@ -138,6 +138,21 @@ export async function setLocale(locale: "ja" | "en"): Promise<AppSettings> {
   return invoke<AppSettings>("set_locale", { locale });
 }
 
+export async function setCloseToTray(enabled: boolean): Promise<AppSettings> {
+  if (!inDesktopApp()) return { ...demoState.settings, closeToTray: enabled };
+  return invoke<AppSettings>("set_close_to_tray", { enabled });
+}
+
+export async function isAutostartEnabled(): Promise<boolean> {
+  if (!inDesktopApp()) return false;
+  return invoke<boolean>("is_autostart_enabled");
+}
+
+export async function setAutostartEnabled(enabled: boolean): Promise<boolean> {
+  if (!inDesktopApp()) return false;
+  return invoke<boolean>("set_autostart_enabled", { enabled });
+}
+
 export async function dismissAiIntegrationNotice(): Promise<AppSettings> {
   if (!inDesktopApp()) {
     demoState.settings = { ...demoState.settings, aiIntegrationNoticeDismissed: true };

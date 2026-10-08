@@ -68,13 +68,56 @@ pub struct AppData {
     pub settings: AppSettings,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
     #[serde(default, deserialize_with = "deserialize_locale")]
     pub locale: Option<String>,
     #[serde(default)]
     pub ai_integration_notice_dismissed: bool,
+    #[serde(default = "default_true")]
+    pub close_to_tray: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            locale: None,
+            ai_integration_notice_dismissed: false,
+            close_to_tray: true,
+        }
+    }
+}
+
+#[cfg(test)]
+mod close_to_tray_tests {
+    use super::*;
+
+    #[test]
+    fn old_state_defaults_to_tray_and_saves_choice() {
+        let old = r#"{"version":2,"profiles":[],"repositories":[],"settings":{"locale":"ja"}}"#;
+        let mut data: AppData = serde_json::from_str(old).unwrap();
+        assert!(data.settings.close_to_tray);
+        data.settings.close_to_tray = false;
+        let saved = serde_json::to_string(&data).unwrap();
+        assert!(saved.contains("\"closeToTray\":false"));
+        let loaded: AppData = serde_json::from_str(&saved).unwrap();
+        assert!(!loaded.settings.close_to_tray);
+    }
+
+    #[test]
+    fn rejects_invalid_close_to_tray() {
+        for value in ["null", "1", "\"false\"", "[]"] {
+            let json = format!(
+                r#"{{"version":2,"profiles":[],"repositories":[],"settings":{{"closeToTray":{value}}}}}"#
+            );
+            assert!(serde_json::from_str::<AppData>(&json).is_err(), "{value}");
+        }
+    }
 }
 
 fn deserialize_locale<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
