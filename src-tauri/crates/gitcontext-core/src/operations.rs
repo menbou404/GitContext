@@ -54,6 +54,14 @@ pub fn set_close_to_tray(store: &StateStore, close_to_tray: bool) -> Result<AppS
     Ok(data.settings)
 }
 
+pub fn set_gui_confirmation(store: &StateStore, enabled: bool) -> Result<AppSettings, String> {
+    let _guard = store.lock()?;
+    let mut data = store.load()?;
+    data.settings.gui_confirmation = enabled;
+    store.save(&data)?;
+    Ok(data.settings)
+}
+
 pub fn dismiss_ai_integration_notice(store: &StateStore) -> Result<AppSettings, String> {
     let _guard = store.lock()?;
     let mut data = store.load()?;

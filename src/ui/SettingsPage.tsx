@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { AlertIcon, CheckIcon, FolderIcon } from "../Icons";
-import { bootstrap, isAutostartEnabled, listBackups, openDataFolder, refreshEnvironment, restoreBackup, setAutostartEnabled, setCloseToTray } from "../backend";
+import { bootstrap, guiConfirmationStatus, isAutostartEnabled, listBackups, openDataFolder, refreshEnvironment, restoreBackup, setAutostartEnabled, setCloseToTray, setGuiConfirmation } from "../backend";
 import { settingsCopy, type Locale } from "../i18n";
 import type { AppSettings, BackupEntry, BootstrapResult, EnvironmentStatus, ToolStatus } from "../types";
 import { ConfirmPanel } from "./ConfirmPanel";
@@ -44,6 +44,8 @@ export function SettingsPage({ locale, result, onLocaleChange, onEnvironment, on
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [savingResident, setSavingResident] = useState(false);
+  const [savingGui, setSavingGui] = useState(false);
+  const [guiWarning, setGuiWarning] = useState<string | null>(null);
   const [autostart, setAutostart] = useState<boolean | null>(null);
   const [savingAutostart, setSavingAutostart] = useState(false);
   const showAutostart = !result.developmentData && !result.demoMode;
@@ -52,6 +54,7 @@ export function SettingsPage({ locale, result, onLocaleChange, onEnvironment, on
     let active = true;
     listBackups().then((items) => { if (active) setBackups(items); })
       .catch((reason) => { if (active) setError(String(reason)); });
+    void guiConfirmationStatus().then((warning) => { if (active) setGuiWarning(warning); });
     return () => { active = false; };
   }, []);
 
@@ -77,6 +80,14 @@ export function SettingsPage({ locale, result, onLocaleChange, onEnvironment, on
     try { setAutostart(await setAutostartEnabled(enabled)); }
     catch (reason) { setError(String(reason)); }
     finally { setSavingAutostart(false); }
+  };
+
+  const changeGui = async (enabled: boolean) => {
+    setSavingGui(true);
+    setError(null);
+    try { onSettingsChange(await setGuiConfirmation(enabled)); setGuiWarning(await guiConfirmationStatus()); }
+    catch (reason) { setError(String(reason)); }
+    finally { setSavingGui(false); }
   };
 
   const recheck = async () => {
@@ -143,6 +154,8 @@ export function SettingsPage({ locale, result, onLocaleChange, onEnvironment, on
       <h2 id="settings-resident">{copy.resident}</h2>
       <div className="ui-settings-resident">
         <label className="ui-check"><input type="checkbox" checked={result.data.settings.closeToTray ?? true} disabled={savingResident} onChange={(event) => void changeResident(event.currentTarget.checked)} />{copy.closeToTray}</label>
+        <label className="ui-check"><input type="checkbox" checked={result.data.settings.guiConfirmation ?? true} disabled={savingGui} onChange={(event) => void changeGui(event.currentTarget.checked)} />{copy.guiConfirmation}</label>
+        {guiWarning && <p className="ui-caution" role="status">{copy.guiUnavailable} ({guiWarning})</p>}
         {showAutostart && <label className="ui-check"><input type="checkbox" checked={autostart ?? false} disabled={autostart === null || savingAutostart} onChange={(event) => void changeAutostart(event.currentTarget.checked)} />{copy.autostart}</label>}
       </div>
     </section>

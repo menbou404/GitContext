@@ -1,3 +1,5 @@
+#[cfg(all(windows, debug_assertions))]
+use gitcontext_core::approval;
 use serde_json::{json, Value};
 use std::{
     fs,
@@ -67,6 +69,17 @@ impl Rpc {
         timeout_ms: Option<u64>,
         desktop: bool,
     ) -> Self {
+        Self::start_with_desktop_and_gui(data_dir, tier, trust, timeout_ms, desktop, None)
+    }
+
+    fn start_with_desktop_and_gui(
+        data_dir: &Path,
+        tier: &str,
+        trust: bool,
+        timeout_ms: Option<u64>,
+        desktop: bool,
+        gui: Option<(&str, &Path)>,
+    ) -> Self {
         let mut command = Command::new(env!("CARGO_BIN_EXE_gitcontext-mcp"));
         command.args(["--max-tier", tier]);
         command.env("USERPROFILE", data_dir.parent().unwrap());
@@ -105,6 +118,10 @@ impl Rpc {
                 "GITCONTEXT_TEST_CONFIRMATION_TIMEOUT_MS",
                 timeout_ms.to_string(),
             );
+        }
+        if let Some((pipe, executable)) = gui {
+            command.env("GITCONTEXT_TEST_APPROVAL_PIPE", pipe);
+            command.env("GITCONTEXT_TEST_APPROVAL_SERVER_EXE", executable);
         }
         let mut child = command
             .env("GITCONTEXT_DATA_DIR", data_dir)
@@ -1056,6 +1073,45 @@ fn remote_without_elicitation_is_rejected_and_audited() {
     assert_eq!(last["tool"], "push");
     assert_eq!(last["outcome"], "rejected");
     assert!(last["confirmation"].is_null());
+}
+
+#[cfg(all(windows, debug_assertions))]
+#[test]
+fn gui_confirmation_over_stdio_approves_declines_and_rejects_immediate_answers() {
+    for (approved, pause, expected) in [
+        (true, 1100, "Test stopped before"),
+        (false, 1100, "Confirmation declined"),
+        (true, 0, "too quickly"),
+    ] {
+        let fixture = Fixture::new();
+        let (_, data_dir) = push_fixture(&fixture);
+        let pipe = format!(r"\\.\pipe\gitcontext-mcp-test-{}", uuid::Uuid::new_v4());
+        approval::start_server(pipe.clone(), move |_| {
+            std::thread::sleep(Duration::from_millis(pause));
+            approved
+        })
+        .unwrap();
+        let executable = std::env::current_exe().unwrap();
+        let mut rpc = Rpc::start_with_desktop_and_gui(
+            &data_dir,
+            "remote",
+            false,
+            None,
+            false,
+            Some((&pipe, &executable)),
+        );
+        initialize(&mut rpc);
+        let id = applied_push_preview(&mut rpc);
+        let response = rpc.call(5, "push", json!({"previewId":id}));
+        assert!(
+            response["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains(expected),
+            "{response}"
+        );
+        assert_eq!(last_audit(&data_dir)["confirmation"], "gui");
+    }
 }
 
 #[test]

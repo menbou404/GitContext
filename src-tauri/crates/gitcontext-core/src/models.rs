@@ -77,6 +77,8 @@ pub struct AppSettings {
     pub ai_integration_notice_dismissed: bool,
     #[serde(default = "default_true")]
     pub close_to_tray: bool,
+    #[serde(default = "default_true")]
+    pub gui_confirmation: bool,
 }
 
 fn default_true() -> bool {
@@ -89,6 +91,7 @@ impl Default for AppSettings {
             locale: None,
             ai_integration_notice_dismissed: false,
             close_to_tray: true,
+            gui_confirmation: true,
         }
     }
 }
@@ -102,6 +105,7 @@ mod close_to_tray_tests {
         let old = r#"{"version":2,"profiles":[],"repositories":[],"settings":{"locale":"ja"}}"#;
         let mut data: AppData = serde_json::from_str(old).unwrap();
         assert!(data.settings.close_to_tray);
+        assert!(data.settings.gui_confirmation);
         data.settings.close_to_tray = false;
         let saved = serde_json::to_string(&data).unwrap();
         assert!(saved.contains("\"closeToTray\":false"));

@@ -1,4 +1,4 @@
-use gitcontext_core::audit;
+use gitcontext_core::{approval, audit};
 mod output;
 mod preview;
 
@@ -73,6 +73,7 @@ const AUTOMATIC_AUDIT_SUMMARY: &str =
 enum Confirmation {
     Client,
     Elicitation,
+    Gui,
 }
 
 fn confirmation_method(
@@ -85,7 +86,7 @@ fn confirmation_method(
     } else if trust {
         Ok(Confirmation::Client)
     } else {
-        Err("This client cannot show GitContext's confirmation prompt. GitHub operations are disabled for it. Review the AI integration settings in GitContext.")
+        Err("This client cannot show GitContext's confirmation prompt. Start GitContext and try again. Review the AI integration settings in GitContext.")
     }
 }
 
@@ -735,14 +736,68 @@ impl GitContextServer {
         let confirmation = if auto_approved {
             "auto"
         } else {
-            let method = confirmation_method(
-                self.trust_client_approval,
-                client.as_ref().is_some_and(|info| info.elicitation),
-                self.desktop_code_tab
-                    || client.as_ref().is_some_and(|info| {
-                        unreliable_client(&info.name, UNRELIABLE_ELICITATION_CLIENTS)
-                    }),
-            );
+            let supports_elicitation = client.as_ref().is_some_and(|info| info.elicitation);
+            let unreliable = self.desktop_code_tab
+                || client.as_ref().is_some_and(|info| {
+                    unreliable_client(&info.name, UNRELIABLE_ELICITATION_CLIENTS)
+                });
+            let gui_result = if !supports_elicitation || unreliable {
+                match self.confirmation_prompt(name, &entry, target.as_deref()) {
+                    Ok(prompt) => {
+                        let timeout = self.confirmation_timeout;
+                        let client_name = client_name.map(str::to_owned);
+                        Some(
+                            tokio::task::spawn_blocking(move || {
+                                let started = Instant::now();
+                                let pipe = if cfg!(debug_assertions) {
+                                    std::env::var("GITCONTEXT_TEST_APPROVAL_PIPE")
+                                        .ok()
+                                        .map(Ok)
+                                        .unwrap_or_else(approval::pipe_name)
+                                } else {
+                                    approval::pipe_name()
+                                }?;
+                                let executable =
+                                    std::env::current_exe().map_err(|e| e.to_string())?;
+                                let expected = if cfg!(debug_assertions) {
+                                    std::env::var_os("GITCONTEXT_TEST_APPROVAL_SERVER_EXE")
+                                        .map(std::path::PathBuf::from)
+                                        .unwrap_or_else(|| approval::expected_gui_path(&executable))
+                                } else {
+                                    approval::expected_gui_path(&executable)
+                                };
+                                let request = approval::ApprovalRequest::new(
+                                    name,
+                                    prompt,
+                                    client_name,
+                                    timeout,
+                                );
+                                let approved =
+                                    approval::request(&pipe, &expected, &request, timeout)?;
+                                Ok::<_, String>((approved, started.elapsed()))
+                            })
+                            .await,
+                        )
+                    }
+                    Err(error) => {
+                        return self
+                            .remote_result(name, &ids, client_name, Some("gui"), Err(error), true)
+                            .await
+                            .into();
+                    }
+                }
+            } else {
+                None
+            };
+            let gui_result = match gui_result {
+                Some(result) => result.ok().and_then(Result::ok),
+                None => None,
+            };
+            let method = if gui_result.is_some() {
+                Ok(Confirmation::Gui)
+            } else {
+                confirmation_method(self.trust_client_approval, supports_elicitation, unreliable)
+            };
             let method = match method {
                 Ok(method) => method,
                 Err(message) => {
@@ -762,6 +817,7 @@ impl GitContextServer {
             let confirmation = match method {
                 Confirmation::Client => "client",
                 Confirmation::Elicitation => "elicitation",
+                Confirmation::Gui => "gui",
             };
             if approval_response.is_some() && method != Confirmation::Elicitation {
                 return self
@@ -776,7 +832,24 @@ impl GitContextServer {
                     .await
                     .into();
             }
-            if let Some((responses, responded_after)) = approval_response {
+            if let Some((approved, elapsed)) = gui_result {
+                let result = if elapsed < MIN_HUMAN_RESPONSE {
+                    Err(
+                        "GitContext responded too quickly for a person to review the confirmation."
+                            .into(),
+                    )
+                } else if approved {
+                    Ok(())
+                } else {
+                    Err("Confirmation declined in GitContext.".into())
+                };
+                if let Err(reason) = result {
+                    return self
+                        .remote_result(name, &ids, client_name, Some("gui"), Err(reason), true)
+                        .await
+                        .into();
+                }
+            } else if let Some((responses, responded_after)) = approval_response {
                 if let Err(reason) = interpret_mrtr_approval(&responses, responded_after) {
                     return self
                         .remote_result(

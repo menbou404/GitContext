@@ -80,6 +80,53 @@ pub fn set_close_to_tray(
 }
 
 #[tauri::command]
+pub fn set_gui_confirmation(
+    app: AppHandle,
+    store: State<'_, StateStore>,
+    enabled: bool,
+) -> Result<AppSettings, String> {
+    let settings = operations::set_gui_confirmation(&store, enabled)?;
+    let state = app.state::<crate::approval::ApprovalState>();
+    state.set_enabled(enabled);
+    if enabled {
+        let _ = crate::approval::start(&app);
+    }
+    Ok(settings)
+}
+
+#[tauri::command]
+pub fn gui_confirmation_status(state: State<'_, crate::approval::ApprovalState>) -> Option<String> {
+    state.status()
+}
+
+#[tauri::command]
+pub fn current_approval(
+    state: State<'_, crate::approval::ApprovalState>,
+) -> Option<gitcontext_core::approval::ApprovalRequest> {
+    state.current()
+}
+
+#[tauri::command]
+pub fn approval_locale(store: State<'_, StateStore>) -> Result<Option<String>, String> {
+    let _guard = store.lock()?;
+    Ok(store.load()?.settings.locale)
+}
+
+#[tauri::command]
+pub fn answer_approval(
+    app: AppHandle,
+    state: State<'_, crate::approval::ApprovalState>,
+    id: String,
+    approved: bool,
+) -> Result<(), String> {
+    state.answer(&id, approved)?;
+    if let Some(window) = app.get_webview_window("approval") {
+        let _ = window.hide();
+    }
+    Ok(())
+}
+
+#[tauri::command]
 pub fn is_autostart_enabled(app: AppHandle) -> Result<bool, String> {
     if cfg!(debug_assertions) {
         return Err("Autostart is unavailable in development builds.".into());
