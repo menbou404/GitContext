@@ -9,7 +9,10 @@ use gitcontext_core::{
     operations, repository_status,
     storage::{BackupEntry, StateStore},
 };
+use std::sync::atomic::{AtomicBool, Ordering};
+use tauri::Manager;
 use tauri::{AppHandle, Emitter, State};
+use tauri_plugin_autostart::ManagerExt;
 const GITHUB_AUTH_PROMPT_EVENT: &str = "github-auth-prompt";
 
 #[tauri::command]
@@ -55,8 +58,49 @@ pub fn bootstrap(store: State<'_, StateStore>) -> Result<BootstrapResult, String
 }
 
 #[tauri::command]
-pub fn set_locale(store: State<'_, StateStore>, locale: String) -> Result<AppSettings, String> {
-    operations::set_locale(&store, locale)
+pub fn set_locale(
+    app: AppHandle,
+    store: State<'_, StateStore>,
+    locale: String,
+) -> Result<AppSettings, String> {
+    let settings = operations::set_locale(&store, locale)?;
+    crate::update_tray_menu(&app, settings.locale.as_deref())?;
+    Ok(settings)
+}
+
+#[tauri::command]
+pub fn set_close_to_tray(
+    store: State<'_, StateStore>,
+    close_to_tray: State<'_, AtomicBool>,
+    enabled: bool,
+) -> Result<AppSettings, String> {
+    let settings = operations::set_close_to_tray(&store, enabled)?;
+    close_to_tray.store(settings.close_to_tray, Ordering::Relaxed);
+    Ok(settings)
+}
+
+#[tauri::command]
+pub fn is_autostart_enabled(app: AppHandle) -> Result<bool, String> {
+    if cfg!(debug_assertions) {
+        return Err("Autostart is unavailable in development builds.".into());
+    }
+    app.autolaunch()
+        .is_enabled()
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn set_autostart_enabled(app: AppHandle, enabled: bool) -> Result<bool, String> {
+    if cfg!(debug_assertions) {
+        return Err("Autostart is unavailable in development builds.".into());
+    }
+    let autostart = app.autolaunch();
+    if enabled {
+        autostart.enable().map_err(|error| error.to_string())?;
+    } else {
+        autostart.disable().map_err(|error| error.to_string())?;
+    }
+    autostart.is_enabled().map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -75,8 +119,16 @@ pub fn list_backups(store: State<'_, StateStore>) -> Result<Vec<BackupEntry>, St
 }
 
 #[tauri::command]
-pub fn restore_backup(store: State<'_, StateStore>, file_name: String) -> Result<AppData, String> {
-    store.restore_backup(&file_name)
+pub fn restore_backup(
+    app: AppHandle,
+    store: State<'_, StateStore>,
+    file_name: String,
+) -> Result<AppData, String> {
+    let data = store.restore_backup(&file_name)?;
+    app.state::<AtomicBool>()
+        .store(data.settings.close_to_tray, Ordering::Relaxed);
+    crate::update_tray_menu(&app, data.settings.locale.as_deref())?;
+    Ok(data)
 }
 
 #[tauri::command]

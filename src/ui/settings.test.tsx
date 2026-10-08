@@ -10,16 +10,24 @@ const backups = [
 ];
 
 describe("settings", () => {
-  it("renders the three sections and locale choices in both languages", () => {
+  it("renders the resident section and shows autostart only in release builds", () => {
     for (const locale of ["ja", "en"] as const) {
-      const html = renderToStaticMarkup(<SettingsPage locale={locale} result={demoBootstrap} onLocaleChange={() => {}} onEnvironment={() => {}} onRestored={() => {}} />);
+      const props = { locale, onLocaleChange: () => {}, onEnvironment: () => {}, onSettingsChange: () => {}, onRestored: () => {} };
+      const html = renderToStaticMarkup(<SettingsPage {...props} result={demoBootstrap} />);
       const copy = settingsCopy[locale];
       expect(html).toContain(copy.environment);
       expect(html).toContain(copy.language);
       expect(html).toContain(copy.data);
+      expect(html).toContain(copy.resident);
+      expect(html).toContain(copy.closeToTray);
+      expect(html).not.toContain(copy.autostart);
       expect(html).toContain("日本語");
       expect(html).toContain("English");
       expect(html).toContain(copy.openFolder);
+      const development = renderToStaticMarkup(<SettingsPage {...props} result={{ ...demoBootstrap, demoMode: false, developmentData: true }} />);
+      expect(development).not.toContain(copy.autostart);
+      const release = renderToStaticMarkup(<SettingsPage {...props} result={{ ...demoBootstrap, demoMode: false, developmentData: false }} />);
+      expect(release).toContain(copy.autostart);
     }
   });
 

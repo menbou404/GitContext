@@ -44,6 +44,16 @@ pub fn set_locale(store: &StateStore, locale: String) -> Result<AppSettings, Str
     Ok(data.settings)
 }
 
+pub fn set_close_to_tray(store: &StateStore, close_to_tray: bool) -> Result<AppSettings, String> {
+    let _guard = store.lock()?;
+    let mut data = store.load()?;
+    if data.settings.close_to_tray != close_to_tray {
+        data.settings.close_to_tray = close_to_tray;
+        store.save(&data)?;
+    }
+    Ok(data.settings)
+}
+
 pub fn dismiss_ai_integration_notice(store: &StateStore) -> Result<AppSettings, String> {
     let _guard = store.lock()?;
     let mut data = store.load()?;

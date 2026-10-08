@@ -69,6 +69,7 @@ export interface AppData {
 export interface AppSettings {
   locale?: string | null;
   aiIntegrationNoticeDismissed?: boolean;
+  closeToTray?: boolean;
 }
 
 export interface ToolStatus {

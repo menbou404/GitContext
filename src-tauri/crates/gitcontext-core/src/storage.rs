@@ -693,6 +693,30 @@ mod tests {
     }
 
     #[test]
+    fn close_to_tray_defaults_and_persists_in_state_file() {
+        let store = temporary_store();
+        fs::create_dir_all(store.config_dir()).unwrap();
+        fs::write(
+            store.state_path(),
+            r#"{"version":2,"profiles":[],"repositories":[],"settings":{"locale":"ja"}}"#,
+        )
+        .unwrap();
+        assert!(store.load().unwrap().settings.close_to_tray);
+        let settings = crate::operations::set_close_to_tray(&store, false).unwrap();
+        assert!(!settings.close_to_tray);
+        assert!(!store.load().unwrap().settings.close_to_tray);
+        let saved = fs::read_to_string(store.state_path()).unwrap();
+        assert!(saved.contains("\"closeToTray\": false"));
+        fs::write(
+            store.state_path(),
+            r#"{"version":2,"profiles":[],"repositories":[],"settings":{"closeToTray":"no"}}"#,
+        )
+        .unwrap();
+        assert!(store.load().is_err());
+        fs::remove_dir_all(store.config_dir()).unwrap();
+    }
+
+    #[test]
     fn invalid_saved_locales_are_ignored() {
         let store = temporary_store();
         fs::create_dir_all(store.config_dir()).unwrap();

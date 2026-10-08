@@ -1,15 +1,116 @@
 mod commands;
 
 use gitcontext_core::storage::open_default_store;
-use tauri::Manager;
+use std::sync::atomic::{AtomicBool, Ordering};
+use tauri::{
+    menu::{Menu, MenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    Manager,
+};
+
+const TRAY_ID: &str = "gitcontext-tray";
+const OPEN_ID: &str = "open";
+const QUIT_ID: &str = "quit";
+
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
+fn tray_menu(app: &tauri::AppHandle, locale: Option<&str>) -> tauri::Result<Menu<tauri::Wry>> {
+    let (open_label, quit_label) = if locale == Some("ja") {
+        ("GitContextを開く", "終了")
+    } else {
+        ("Open GitContext", "Quit")
+    };
+    let open = MenuItem::with_id(app, OPEN_ID, open_label, true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, QUIT_ID, quit_label, true, None::<&str>)?;
+    Menu::with_items(app, &[&open, &quit])
+}
+
+pub(crate) fn update_tray_menu(app: &tauri::AppHandle, locale: Option<&str>) -> Result<(), String> {
+    if let Some(tray) = app.tray_by_id(TRAY_ID) {
+        tray.set_menu(Some(
+            tray_menu(app, locale).map_err(|error| error.to_string())?,
+        ))
+        .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
+            show_main_window(app)
+        }))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec!["--hidden"]),
+        ))
         .setup(|app| {
-            app.manage(open_default_store()?);
+            let store = open_default_store()?;
+            let settings = {
+                let _guard = store.lock()?;
+                store.load()?.settings
+            };
+            app.manage(AtomicBool::new(settings.close_to_tray));
+            let locale = settings.locale.as_deref();
+            let tooltip = if cfg!(debug_assertions) {
+                if locale == Some("ja") {
+                    "GitContext（開発版）"
+                } else {
+                    "GitContext (development)"
+                }
+            } else {
+                "GitContext"
+            };
+            let icon = app
+                .default_window_icon()
+                .cloned()
+                .ok_or("App icon is missing")?;
+            TrayIconBuilder::with_id(TRAY_ID)
+                .icon(icon)
+                .tooltip(tooltip)
+                .menu(&tray_menu(app.handle(), locale)?)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| match event.id().as_ref() {
+                    OPEN_ID => show_main_window(app),
+                    QUIT_ID => app.exit(0),
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if matches!(
+                        event,
+                        TrayIconEvent::Click {
+                            button: MouseButton::Left,
+                            button_state: MouseButtonState::Up,
+                            ..
+                        }
+                    ) {
+                        show_main_window(tray.app_handle());
+                    }
+                })
+                .build(app)?;
+            app.manage(store);
+            if !std::env::args_os().any(|arg| arg == "--hidden") {
+                show_main_window(app.handle());
+            }
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if window.label() == "main" {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    if window.state::<AtomicBool>().load(Ordering::Relaxed) {
+                        api.prevent_close();
+                        let _ = window.hide();
+                    }
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             commands::list_ai_clients,
@@ -18,6 +119,9 @@ pub fn run() {
             commands::verify_ai_client,
             commands::bootstrap,
             commands::set_locale,
+            commands::set_close_to_tray,
+            commands::is_autostart_enabled,
+            commands::set_autostart_enabled,
             commands::dismiss_ai_integration_notice,
             commands::refresh_environment,
             commands::list_backups,

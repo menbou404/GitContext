@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { AlertIcon, CheckIcon, FolderIcon } from "../Icons";
-import { bootstrap, listBackups, openDataFolder, refreshEnvironment, restoreBackup } from "../backend";
+import { bootstrap, isAutostartEnabled, listBackups, openDataFolder, refreshEnvironment, restoreBackup, setAutostartEnabled, setCloseToTray } from "../backend";
 import { settingsCopy, type Locale } from "../i18n";
-import type { BackupEntry, BootstrapResult, EnvironmentStatus, ToolStatus } from "../types";
+import type { AppSettings, BackupEntry, BootstrapResult, EnvironmentStatus, ToolStatus } from "../types";
 import { ConfirmPanel } from "./ConfirmPanel";
 
 const folderOf = (path: string) => path.replace(/[\\/]state\.json$/i, "");
@@ -28,11 +28,12 @@ export function BackupList({ backups, locale, selected, restoring, onSelect, onR
   </li>)}</ul>;
 }
 
-export function SettingsPage({ locale, result, onLocaleChange, onEnvironment, onRestored }: {
+export function SettingsPage({ locale, result, onLocaleChange, onEnvironment, onSettingsChange, onRestored }: {
   locale: Locale;
   result: BootstrapResult;
   onLocaleChange: (locale: Locale) => void;
   onEnvironment: (environment: EnvironmentStatus) => void;
+  onSettingsChange: (settings: AppSettings) => void;
   onRestored: (result: BootstrapResult) => void;
 }) {
   const copy = settingsCopy[locale];
@@ -42,6 +43,10 @@ export function SettingsPage({ locale, result, onLocaleChange, onEnvironment, on
   const [restoring, setRestoring] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [savingResident, setSavingResident] = useState(false);
+  const [autostart, setAutostart] = useState<boolean | null>(null);
+  const [savingAutostart, setSavingAutostart] = useState(false);
+  const showAutostart = !result.developmentData && !result.demoMode;
 
   useEffect(() => {
     let active = true;
@@ -49,6 +54,30 @@ export function SettingsPage({ locale, result, onLocaleChange, onEnvironment, on
       .catch((reason) => { if (active) setError(String(reason)); });
     return () => { active = false; };
   }, []);
+
+  useEffect(() => {
+    if (!showAutostart) return;
+    let active = true;
+    isAutostartEnabled().then((enabled) => { if (active) setAutostart(enabled); })
+      .catch((reason) => { if (active) setError(String(reason)); });
+    return () => { active = false; };
+  }, [showAutostart]);
+
+  const changeResident = async (enabled: boolean) => {
+    setSavingResident(true);
+    setError(null);
+    try { onSettingsChange(await setCloseToTray(enabled)); }
+    catch (reason) { setError(String(reason)); }
+    finally { setSavingResident(false); }
+  };
+
+  const changeAutostart = async (enabled: boolean) => {
+    setSavingAutostart(true);
+    setError(null);
+    try { setAutostart(await setAutostartEnabled(enabled)); }
+    catch (reason) { setError(String(reason)); }
+    finally { setSavingAutostart(false); }
+  };
 
   const recheck = async () => {
     setChecking(true);
@@ -108,6 +137,14 @@ export function SettingsPage({ locale, result, onLocaleChange, onEnvironment, on
     <section className="ui-card" aria-labelledby="settings-language">
       <h2 id="settings-language">{copy.language}</h2>
       <label className="ui-settings-language" htmlFor="settings-locale"><span className="ui-sr-only">{copy.language}</span><select id="settings-locale" value={locale} onChange={(event) => onLocaleChange(event.currentTarget.value as Locale)}><option value="ja">日本語</option><option value="en">English</option></select></label>
+    </section>
+
+    <section className="ui-card" aria-labelledby="settings-resident">
+      <h2 id="settings-resident">{copy.resident}</h2>
+      <div className="ui-settings-resident">
+        <label className="ui-check"><input type="checkbox" checked={result.data.settings.closeToTray ?? true} disabled={savingResident} onChange={(event) => void changeResident(event.currentTarget.checked)} />{copy.closeToTray}</label>
+        {showAutostart && <label className="ui-check"><input type="checkbox" checked={autostart ?? false} disabled={autostart === null || savingAutostart} onChange={(event) => void changeAutostart(event.currentTarget.checked)} />{copy.autostart}</label>}
+      </div>
     </section>
 
     <section className="ui-card" aria-labelledby="settings-data">
