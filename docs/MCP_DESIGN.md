@@ -156,7 +156,7 @@ stdio接続のMCPサーバーは、クライアントごとに別プロセスと
 
 ## 人の確認
 
-GUIでの承認は行わない。MCPサーバー単体で使う人がいるため、確認はMCPの仕組みの中で完結させる。
+確認は、MCPの仕組み（elicitation）を基本とする。MCPサーバー単体で使う人がいるため、GUIが起動していなくても確認できるようにする。確認画面を出せないクライアントについては、GitContextが通知領域に常駐している場合に限り、GitContextの画面で確認する（[BACKGROUND_DESIGN.md](BACKGROUND_DESIGN.md)。段階B-1で実装する予定）。
 
 ### サーバーからの確認要求（elicitation）
 
