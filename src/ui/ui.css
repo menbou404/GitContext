@@ -182,6 +182,8 @@ html, body, #root { min-width: 1050px; }
 .ui-environment-item svg, .ui-settings-error svg { width: 16px; height: 16px; flex: 0 0 16px; }
 .ui-environment-item p { margin: 0; }
 .ui-settings-language select { min-width: 180px; min-height: 36px; padding: 4px 10px; border: 1px solid var(--ui-input-line); border-radius: 6px; background: var(--ui-surface); color: var(--ui-ink); font: 13px var(--ui-font); }
+.ui-settings-choice { display: flex; flex-direction: column; gap: 6px; }
+.ui-settings-choice select { min-width: 180px; min-height: 36px; padding: 4px 10px; border: 1px solid var(--ui-input-line); border-radius: 6px; background: var(--ui-surface); color: var(--ui-ink); font: 13px var(--ui-font); }
 .ui-settings-resident { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
 .ui-data-folder > div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .ui-data-folder code { overflow-wrap: anywhere; font: 13px var(--ui-mono); }

@@ -148,6 +148,20 @@ export async function setGuiConfirmation(enabled: boolean): Promise<AppSettings>
   return invoke<AppSettings>("set_gui_confirmation", { enabled });
 }
 
+export async function setAiNotifications(value: "off" | "github" | "all"): Promise<AppSettings> {
+  if (!inDesktopApp()) { demoState.settings = { ...demoState.settings, aiNotifications: value }; return demoState.settings; }
+  return invoke<AppSettings>("set_ai_notifications", { value });
+}
+
+export async function setStatusNotifications(enabled: boolean): Promise<AppSettings> {
+  if (!inDesktopApp()) { demoState.settings = { ...demoState.settings, statusNotifications: enabled }; return demoState.settings; }
+  return invoke<AppSettings>("set_status_notifications", { enabled });
+}
+
+export async function reportRepositoryStatuses(statuses: RepositoryStatus[]): Promise<void> {
+  if (inDesktopApp()) await invoke("report_repository_statuses", { count: statuses.filter((item) => item.state === "reapply" || item.state === "attention").length });
+}
+
 export async function guiConfirmationStatus(): Promise<string | null> {
   if (!inDesktopApp()) return null;
   return invoke<string | null>("gui_confirmation_status");

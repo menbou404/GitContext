@@ -79,6 +79,31 @@ pub struct AppSettings {
     pub close_to_tray: bool,
     #[serde(default = "default_true")]
     pub gui_confirmation: bool,
+    #[serde(default, deserialize_with = "deserialize_ai_notifications")]
+    pub ai_notifications: AiNotifications,
+    #[serde(default = "default_true")]
+    pub status_notifications: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AiNotifications {
+    Off,
+    #[default]
+    Github,
+    All,
+}
+
+fn deserialize_ai_notifications<'de, D>(deserializer: D) -> Result<AiNotifications, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(match value.as_str() {
+        Some("off") => AiNotifications::Off,
+        Some("all") => AiNotifications::All,
+        _ => AiNotifications::Github,
+    })
 }
 
 fn default_true() -> bool {
@@ -92,6 +117,8 @@ impl Default for AppSettings {
             ai_integration_notice_dismissed: false,
             close_to_tray: true,
             gui_confirmation: true,
+            ai_notifications: AiNotifications::Github,
+            status_notifications: true,
         }
     }
 }
@@ -106,11 +133,24 @@ mod close_to_tray_tests {
         let mut data: AppData = serde_json::from_str(old).unwrap();
         assert!(data.settings.close_to_tray);
         assert!(data.settings.gui_confirmation);
+        assert_eq!(data.settings.ai_notifications, AiNotifications::Github);
+        assert!(data.settings.status_notifications);
         data.settings.close_to_tray = false;
         let saved = serde_json::to_string(&data).unwrap();
         assert!(saved.contains("\"closeToTray\":false"));
         let loaded: AppData = serde_json::from_str(&saved).unwrap();
         assert!(!loaded.settings.close_to_tray);
+    }
+
+    #[test]
+    fn invalid_ai_notification_value_defaults_to_github() {
+        for value in ["null", "1", "\"unknown\"", "[]"] {
+            let json = format!(
+                r#"{{"version":2,"profiles":[],"repositories":[],"settings":{{"aiNotifications":{value}}}}}"#
+            );
+            let data: AppData = serde_json::from_str(&json).unwrap();
+            assert_eq!(data.settings.ai_notifications, AiNotifications::Github);
+        }
     }
 
     #[test]

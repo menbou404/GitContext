@@ -1,6 +1,7 @@
 pub mod ai_clients;
 pub mod approval;
 pub mod audit;
+pub mod background;
 pub mod environment;
 pub mod git_ops;
 pub mod github;

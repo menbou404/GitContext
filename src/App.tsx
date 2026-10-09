@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
+import { isTauri } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import {
   addRepository,
   applyAssignment,
@@ -13,6 +15,7 @@ import {
   listAiClients,
   previewAssignment,
   removeRepository,
+  reportRepositoryStatuses,
   saveProfile,
   setLocale,
   setProfileAutoApprove,
@@ -278,6 +281,7 @@ function App({ previewLocale }: { previewLocale?: Locale }) {
   const [statusRefreshing, setStatusRefreshing] = useState(false);
   const [statusesRefreshedAt, setStatusesRefreshedAt] = useState<Date | null>(null);
   const [page, setPage] = useState<ShellPage>("repositories");
+  const [attentionFilterRequest, setAttentionFilterRequest] = useState(0);
   const [selectedRepositoryId, setSelectedRepositoryId] = useState<string | null>(null);
   const [pendingProfileId, setPendingProfileId] = useState("");
   const [editingProfile, setEditingProfile] = useState<EditingProfile | null>(null);
@@ -290,6 +294,20 @@ function App({ previewLocale }: { previewLocale?: Locale }) {
     document.documentElement.lang = locale;
     document.title = copy.documentTitle;
   }, [copy.documentTitle, locale]);
+
+  useEffect(() => {
+    if (!isTauri()) return;
+    let active = true;
+    let unlisten: (() => void) | undefined;
+    void listen("open-attention-repositories", () => {
+      if (!active) return;
+      setSelectedRepositoryId(null);
+      setEditingProfile(null);
+      setPage("repositories");
+      setAttentionFilterRequest((value) => value + 1);
+    }).then((stop) => { if (active) unlisten = stop; else stop(); });
+    return () => { active = false; unlisten?.(); };
+  }, []);
 
   useEffect(() => {
     bootstrap()
@@ -385,6 +403,7 @@ function App({ previewLocale }: { previewLocale?: Locale }) {
       .then((items) => {
         setStatuses(Object.fromEntries(items.map((item) => [item.repositoryId, item])));
         setStatusesRefreshedAt(new Date());
+        void reportRepositoryStatuses(items).catch((error) => console.error("Could not update tray status", error));
       })
       .catch((error) => setErrorNotice(`${messageFrom(error, locale)} ${shellCopy[locale].refresh}`))
       .finally(() => {
@@ -562,7 +581,7 @@ function App({ previewLocale }: { previewLocale?: Locale }) {
         onStartRemove={() => setRemoveConfirmingId(selectedRepository.id)} onCancelRemove={() => setRemoveConfirmingId(null)} onRemove={removeSelected}
         onData={updateData} onFinished={refreshStatuses} />
         : data.repositories.length === 0 ? firstRunGuide
-        : <RepositoryList repositories={data.repositories} profiles={data.profiles} statuses={statuses} locale={locale} busy={busy} refreshing={statusRefreshing} refreshedAt={statusesRefreshedAt} onOpen={selectRepository} onAdd={addRepo} onClone={() => setCloneOpen(true)} onRefresh={refreshStatuses} />}
+        : <RepositoryList key={attentionFilterRequest} initialFilter={attentionFilterRequest > 0 ? "action" : "all"} repositories={data.repositories} profiles={data.profiles} statuses={statuses} locale={locale} busy={busy} refreshing={statusRefreshing} refreshedAt={statusesRefreshedAt} onOpen={selectRepository} onAdd={addRepo} onClone={() => setCloneOpen(true)} onRefresh={refreshStatuses} />}
 
       {cloneOpen && <CloneDialog profiles={data.profiles} locale={locale} onClose={() => setCloneOpen(false)} onClone={cloneRepositoryAction} />}
     </Shell>
