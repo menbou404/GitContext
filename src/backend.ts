@@ -143,6 +143,16 @@ export async function setCloseToTray(enabled: boolean): Promise<AppSettings> {
   return invoke<AppSettings>("set_close_to_tray", { enabled });
 }
 
+export async function setGuiConfirmation(enabled: boolean): Promise<AppSettings> {
+  if (!inDesktopApp()) { demoState.settings = { ...demoState.settings, guiConfirmation: enabled }; return demoState.settings; }
+  return invoke<AppSettings>("set_gui_confirmation", { enabled });
+}
+
+export async function guiConfirmationStatus(): Promise<string | null> {
+  if (!inDesktopApp()) return null;
+  return invoke<string | null>("gui_confirmation_status");
+}
+
 export async function isAutostartEnabled(): Promise<boolean> {
   if (!inDesktopApp()) return false;
   return invoke<boolean>("is_autostart_enabled");

@@ -1,5 +1,10 @@
 export type Locale = "en" | "ja";
 
+export const approvalCopy = {
+  en: { title: "Confirm GitContext operation", client: "AI client", unknownClient: "Unknown", operation: "Operation", remaining: "Time remaining", seconds: "seconds", reject: "Reject", approve: "Approve", waiting: "Waiting for a request" },
+  ja: { title: "GitContextの操作を確認", client: "AIクライアント", unknownClient: "不明", operation: "操作", remaining: "残り時間", seconds: "秒", reject: "拒否", approve: "承認", waiting: "確認の依頼を待っています" },
+} as const;
+
 export const aiCopy = {
   en: {
     title: "AI integration", lead: "Let AI clients work with Git and GitHub through profiles assigned to repositories.", server: "MCP server", clients: "AI clients", release: "Release", development: "Development", unbuilt: "Not built. Run cargo build -p gitcontext-mcp.",
@@ -151,7 +156,7 @@ export const historyCopy = {
     date: "Date and time", operation: "Operation", repository: "Repository", profile: "Profile", actor: "Actor", result: "Result", confirmation: "Confirmation method",
     allRepositories: "All repositories", allProfiles: "All profiles", allActors: "All actors", gui: "GUI", aiClient: "AI client", unknownClient: "mcp",
     deletedRepository: "Deleted repository", deletedProfile: "Deleted profile", none: "None", empty: "No history to show.", retry: "Check the data folder and reload.",
-    success: "Success", failed: "Failed", rejected: "Rejected", confirmationScreen: "Confirmation screen", automatic: "Auto approved", clientApproval: "Left to client",
+    success: "Success", failed: "Failed", rejected: "Rejected", confirmationScreen: "Confirmation screen", gitContextScreen: "GitContext window", automatic: "Auto approved", clientApproval: "Left to client",
     applyProfile: "Apply profile", createPullRequest: "Create Pull Request", mergePullRequest: "Merge Pull Request", publishRepository: "Publish repository", cloneRepository: "Clone repository", addRepository: "Add repository", createBranch: "Create branch", pull: "pull", push: "push", commit: "commit",
   },
   ja: {
@@ -159,7 +164,7 @@ export const historyCopy = {
     date: "日時", operation: "操作", repository: "リポジトリ", profile: "プロファイル", actor: "主体", result: "結果", confirmation: "確認の方法",
     allRepositories: "すべてのリポジトリ", allProfiles: "すべてのプロファイル", allActors: "すべて", gui: "GUI", aiClient: "AIクライアント", unknownClient: "mcp",
     deletedRepository: "削除済みのリポジトリ", deletedProfile: "削除済みのプロファイル", none: "なし", empty: "表示する履歴がありません。", retry: "データフォルダを確認して再読み込みしてください。",
-    success: "成功", failed: "失敗", rejected: "拒否", confirmationScreen: "確認画面", automatic: "自動承認", clientApproval: "クライアントに任せた",
+    success: "成功", failed: "失敗", rejected: "拒否", confirmationScreen: "確認画面", gitContextScreen: "GitContextの画面", automatic: "自動承認", clientApproval: "クライアントに任せた",
     applyProfile: "プロファイルの適用", createPullRequest: "Pull Requestの作成", mergePullRequest: "Pull Requestのmerge", publishRepository: "GitHubへの公開", cloneRepository: "リポジトリのclone", addRepository: "リポジトリの追加", createBranch: "ブランチの作成", pull: "pull", push: "push", commit: "commit",
   },
 } as const;
@@ -168,6 +173,8 @@ export const settingsCopy = {
   en: {
     title: "Settings", environment: "Environment", language: "Language", resident: "Background", data: "Data",
     closeToTray: "Keep GitContext in the notification area when closing the window",
+    guiConfirmation: "Confirm operations from AI clients without a confirmation screen in GitContext",
+    guiUnavailable: "GUI confirmation is unavailable. Restart GitContext and check for another process using its approval pipe.",
     autostart: "Start when signing in to Windows",
     git: "Git", gh: "GitHub CLI", ssh: "SSH", found: "Available", missing: "Not found",
     gitMissing: "Git was not found. Install Git and restart GitContext.",
@@ -185,6 +192,8 @@ export const settingsCopy = {
   ja: {
     title: "設定", environment: "環境", language: "言語", resident: "常駐", data: "データ",
     closeToTray: "ウィンドウを閉じても通知領域に残す",
+    guiConfirmation: "確認画面を出せないAIクライアントの操作を、GitContextで確認する",
+    guiUnavailable: "画面での確認を利用できません。GitContextを再起動し、確認用パイプを使用中のプロセスがないか確認してください。",
     autostart: "Windowsへのサインイン時に起動する",
     git: "Git", gh: "GitHub CLI", ssh: "SSH", found: "利用できます", missing: "見つかりません",
     gitMissing: "Gitが見つかりません。インストールしてGitContextを再起動してください。",

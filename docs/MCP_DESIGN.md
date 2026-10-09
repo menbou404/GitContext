@@ -156,7 +156,7 @@ stdio接続のMCPサーバーは、クライアントごとに別プロセスと
 
 ## 人の確認
 
-確認は、MCPの仕組み（elicitation）を基本とする。MCPサーバー単体で使う人がいるため、GUIが起動していなくても確認できるようにする。確認画面を出せないクライアントについては、GitContextが通知領域に常駐している場合に限り、GitContextの画面で確認する（[BACKGROUND_DESIGN.md](BACKGROUND_DESIGN.md)。段階B-1で実装する予定）。
+確認は、MCPの仕組み（elicitation）を基本とする。MCPサーバー単体で使う人がいるため、GUIが起動していなくても確認できるようにする。確認画面を出せないクライアントについては、GitContextが起動している場合にGitContextの画面で確認する（[BACKGROUND_DESIGN.md](BACKGROUND_DESIGN.md)の段階B-1）。
 
 ### サーバーからの確認要求（elicitation）
 
@@ -189,12 +189,13 @@ MRTRの`requestState`はサーバー側の確認待ちを指す不透明なラ�
 
 ### 確認の方法の決め方
 
-既定では、人の確認なしにGitHubが変更されないようにする。そのうえで、確認画面を出せないクライアントでも、利用者が警告を理解して選んだ場合に限り、クライアント自身の確認に任せられるようにする。
+既定では、人の確認なしにGitHubが変更されないようにする。elicitationを使えない場合はGitContextの画面で確認する。GUIが使えない場合に限り、利用者が警告を理解して選んだ`--trust-client-approval`によってクライアント自身の確認に任せる。
 
 | クライアントの状態 | `--trust-client-approval`なし（既定） | `--trust-client-approval`あり |
 |---|---|---|
 | elicitationに対応し、不安定な一覧にない | elicitationで確認する | elicitationで確認する |
-| elicitationに対応していない、または不安定な一覧にある | 実行しない。AI連携画面で設定を見直すよう案内する | クライアントの確認に任せて実行する |
+| elicitationに対応していない、または不安定な一覧にある。GitContextが起動中 | GitContextの画面で確認する | GitContextの画面で確認する |
+| elicitationに対応していない、または不安定な一覧にある。GitContextが起動していない／接続できない | 実行せず、GitContextの起動を案内する | クライアントの確認に任せて実行する |
 
 - elicitationの「対応」は、フォーム形式の確認を宣言している場合だけとみなす。URLを開かせる形式だけを宣言しているクライアントは「対応していない」として扱う。
 - クライアント名とelicitation対応はリクエストごとに判定する。モダンプロトコルでは各リクエストの`_meta`にある`io.modelcontextprotocol/clientInfo`と`io.modelcontextprotocol/clientCapabilities`を使い、レガシープロトコルでは`initialize`の情報にフォールバックする。監査ログのクライアント名にも同じ情報を使う。
@@ -202,7 +203,8 @@ MRTRの`requestState`はサーバー側の確認待ちを指す不透明なラ�
 - Claude CodeのデスクトップCodeタブが起動したサーバープロセスに空でない`CLAUDE_CODE_DESKTOP_APP_VERSION`がある場合は、起動時に一度判定して不安定なクライアントと同じ扱いにする。CLIとCodeタブは`clientInfo.name`が同じため名前だけでは区別できない。この環境変数は非公開仕様なので補助的な判定であり、応答時間による検出も併用する。
 - `--trust-client-approval`は、GUIの「AI連携」画面で、確認画面を出せないクライアントに「GitHub操作まで」を選び、警告に同意したときだけ登録時に付ける（[UI_DESIGN.md](UI_DESIGN.md)参照）。
 - どの方法でも、プレビューIDの照合は必ず行う。
-- 監査ログには、確認の方法（`elicitation`／`client`／`auto`）と結果を記録する。クライアントに任せた場合と自動承認した場合は、実行結果にもその旨を含める。
+- GUIとの通信はユーザーSIDで識別する名前付きパイプを使う。パイプは作成したユーザーだけに許可し、MCP側はサーバープロセスの実行ファイルが期待するGitContextのパスと一致することを確認する。GUIの拒否・期限切れ・不正な応答は実行しない。GUIの確認は1回の`tools/call`内で完結し、MRTRの再送には使わない。
+- 監査ログには、確認の方法（`elicitation`／`gui`／`client`／`auto`）と結果を記録する。クライアントに任せた場合と自動承認した場合は、実行結果にもその旨を含める。
 
 ### リポジトリごとの自動承認
 
@@ -318,7 +320,7 @@ GUIの「AI連携」画面（[UI_DESIGN.md](UI_DESIGN.md)）は、次のよう�
 - まずは既定の`read`で使い始め、必要になったら`local`、`remote`へ広げることを推奨する。
 - CodexのMCPサーバーはCodexのサンドボックスの外で動く。サンドボックスでGit操作を制限していても、`remote`を公開すればMCP経由でpushやmergeができる点に注意する。
 - GitContext自体の開発では、[CONTRIBUTING.md](../CONTRIBUTING.md)の役割分担に合わせて、Codexには`read`だけを設定する。
-- 確認画面を出せないクライアント（上記「クライアントの対応状況」）でも、GUIで個別に自動承認した操作は`--trust-client-approval`なしで実行できる。その他の`remote`操作に`--trust-client-approval`を付けた場合、GitHub操作の前の確認はクライアント自身の確認だけになる。クライアント側で自動承認を有効にしていると確認なしにpushやmergeが実行されるため、GitContextのツールには毎回確認を出す設定にすること。
+- 確認画面を出せないクライアント（上記「クライアントの対応状況」）でも、GUIで個別に自動承認した操作は`--trust-client-approval`なしで実行できる。その他の`remote`操作は、起動中のGitContextの画面で確認する。GUIに接続できず`--trust-client-approval`を付けた場合だけ、GitHub操作の前の確認はクライアント自身の確認に任せる。クライアント側で自動承認を有効にしていると確認なしにpushやmergeが実行されるため、GitContextのツールには毎回確認を出す設定にすること。
 
 ## 配布
 
@@ -366,7 +368,7 @@ GUIの「AI連携」画面（[UI_DESIGN.md](UI_DESIGN.md)）は、次のよう�
 - **GUIでの承認:** 基本はelicitationで行い、MCPサーバー単体でも動作させる。確認画面を出せないクライアントに限り、GitContextが常駐している場合はGitContextの画面で確認する（2026年10月に変更。当初は「行わない」。[BACKGROUND_DESIGN.md](BACKGROUND_DESIGN.md)）。
 - **`previewId`の保存先:** サーバープロセスのメモリとする。
 - **`remote`の範囲:** push、PR作成、merge、clone、GitHub公開をすべて提供する。ただし`--max-tier remote`を明示して起動した場合だけ公開する。
-- **確認画面を出せないクライアント:** 既定では`remote`を実行しない。警告に同意したうえで`--trust-client-approval`を付けた場合だけ、クライアント自身の確認に任せる（2026年10月決定。当初案の「既定でクライアントの確認に任せ、`--require-confirmation`で拒否する」から変更）。
+- **確認画面を出せないクライアント:** 自動承認が無効なら、起動中のGitContextの専用ウィンドウで確認する。GUIに接続できない場合は、警告に同意して`--trust-client-approval`を付けた場合だけクライアント自身の確認に任せる。それ以外は拒否する（段階B-1）。
 
 ## 未決事項
 

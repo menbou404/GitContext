@@ -70,6 +70,7 @@ export interface AppSettings {
   locale?: string | null;
   aiIntegrationNoticeDismissed?: boolean;
   closeToTray?: boolean;
+  guiConfirmation?: boolean;
 }
 
 export interface ToolStatus {

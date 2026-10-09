@@ -34,6 +34,7 @@ export function outcomeLabel(outcome: string, locale: Locale): string {
 export function confirmationLabel(confirmation: string | null, locale: Locale): string {
   const copy = historyCopy[locale];
   return confirmation === "elicitation" ? copy.confirmationScreen
+    : confirmation === "gui" ? copy.gitContextScreen
     : confirmation === "auto" ? copy.automatic
     : confirmation === "client" ? copy.clientApproval : copy.none;
 }

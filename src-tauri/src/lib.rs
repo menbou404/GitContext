@@ -1,3 +1,4 @@
+mod approval;
 mod commands;
 
 use gitcontext_core::storage::open_default_store;
@@ -59,6 +60,10 @@ pub fn run() {
                 store.load()?.settings
             };
             app.manage(AtomicBool::new(settings.close_to_tray));
+            app.manage(approval::ApprovalState::new(settings.gui_confirmation));
+            if settings.gui_confirmation {
+                let _ = approval::start(app.handle());
+            }
             let locale = settings.locale.as_deref();
             let tooltip = if cfg!(debug_assertions) {
                 if locale == Some("ja") {
@@ -111,6 +116,11 @@ pub fn run() {
                     }
                 }
             }
+            if window.label() == "approval" {
+                if let tauri::WindowEvent::CloseRequested { .. } = event {
+                    window.state::<approval::ApprovalState>().decline();
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             commands::list_ai_clients,
@@ -120,6 +130,11 @@ pub fn run() {
             commands::bootstrap,
             commands::set_locale,
             commands::set_close_to_tray,
+            commands::set_gui_confirmation,
+            commands::gui_confirmation_status,
+            commands::current_approval,
+            commands::approval_locale,
+            commands::answer_approval,
             commands::is_autostart_enabled,
             commands::set_autostart_enabled,
             commands::dismiss_ai_integration_notice,
