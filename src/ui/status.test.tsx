@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { shellCopy } from "../i18n";
 import type { Profile, RepositoryRecord, RepositoryStatus, RepositoryState } from "../types";
 import { StatusLabel } from "./StatusLabel";
+import { RepositoryList } from "./RepositoryList";
 import { FOCUS_REFRESH_INTERVAL_MS, filterRepositories, shouldRefreshOnFocus } from "./status";
 
 const profile: Profile = {
@@ -33,6 +34,15 @@ describe("repository list status", () => {
     expect(filterRepositories(repositories, [profile], statuses, "", "action").map((repo) => repo.id)).toEqual(["reapply", "attention"]);
     expect(filterRepositories(repositories, [profile], statuses, "", "unassigned").map((repo) => repo.id)).toEqual(["unassigned"]);
     expect(filterRepositories(repositories, [profile], statuses, "sample", "all")).toHaveLength(3);
+  });
+
+  it("opens the tray-requested list with needs action selected", () => {
+    const html = renderToStaticMarkup(<RepositoryList repositories={repositories} profiles={[profile]} statuses={statuses} locale="ja" busy={false} refreshing={false} refreshedAt={null} initialFilter="action" onOpen={() => {}} onAdd={() => {}} onClone={() => {}} onRefresh={() => {}} />);
+    expect(html).toContain('aria-pressed="true"');
+    expect(html).toContain("<strong>reapply</strong>");
+    expect(html).toContain("<strong>attention</strong>");
+    expect(html).not.toContain("<strong>ready</strong>");
+    expect(html).not.toContain("<strong>unassigned</strong>");
   });
 
   it("has matching UI keys in Japanese and English", () => {

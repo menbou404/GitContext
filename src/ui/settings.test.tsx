@@ -20,6 +20,11 @@ describe("settings", () => {
       expect(html).toContain(copy.data);
       expect(html).toContain(copy.resident);
       expect(html).toContain(copy.closeToTray);
+      expect(html).toContain(copy.aiNotifications);
+      expect(html).toContain(copy.aiNotificationsOff);
+      expect(html).toContain(copy.aiNotificationsGithub);
+      expect(html).toContain(copy.aiNotificationsAll);
+      expect(html).toContain(copy.statusNotifications);
       expect(html).not.toContain(copy.autostart);
       expect(html).toContain("日本語");
       expect(html).toContain("English");

@@ -64,7 +64,9 @@ pub fn set_locale(
     locale: String,
 ) -> Result<AppSettings, String> {
     let settings = operations::set_locale(&store, locale)?;
-    crate::update_tray_menu(&app, settings.locale.as_deref())?;
+    if let Err(error) = crate::update_tray_menu(&app, settings.locale.as_deref()) {
+        eprintln!("Could not update tray: {error}");
+    }
     Ok(settings)
 }
 
@@ -92,6 +94,27 @@ pub fn set_gui_confirmation(
         let _ = crate::approval::start(&app);
     }
     Ok(settings)
+}
+
+#[tauri::command]
+pub fn set_ai_notifications(
+    store: State<'_, StateStore>,
+    value: AiNotifications,
+) -> Result<AppSettings, String> {
+    operations::set_ai_notifications(&store, value)
+}
+
+#[tauri::command]
+pub fn set_status_notifications(
+    store: State<'_, StateStore>,
+    enabled: bool,
+) -> Result<AppSettings, String> {
+    operations::set_status_notifications(&store, enabled)
+}
+
+#[tauri::command]
+pub fn report_repository_statuses(app: AppHandle, count: usize) {
+    crate::background::report_attention_count(&app, count);
 }
 
 #[tauri::command]
@@ -174,7 +197,9 @@ pub fn restore_backup(
     let data = store.restore_backup(&file_name)?;
     app.state::<AtomicBool>()
         .store(data.settings.close_to_tray, Ordering::Relaxed);
-    crate::update_tray_menu(&app, data.settings.locale.as_deref())?;
+    if let Err(error) = crate::update_tray_menu(&app, data.settings.locale.as_deref()) {
+        eprintln!("Could not update tray: {error}");
+    }
     Ok(data)
 }
 

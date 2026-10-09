@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { AlertIcon, CheckIcon, FolderIcon } from "../Icons";
-import { bootstrap, guiConfirmationStatus, isAutostartEnabled, listBackups, openDataFolder, refreshEnvironment, restoreBackup, setAutostartEnabled, setCloseToTray, setGuiConfirmation } from "../backend";
+import { bootstrap, guiConfirmationStatus, isAutostartEnabled, listBackups, openDataFolder, refreshEnvironment, restoreBackup, setAiNotifications, setAutostartEnabled, setCloseToTray, setGuiConfirmation, setStatusNotifications } from "../backend";
 import { settingsCopy, type Locale } from "../i18n";
 import type { AppSettings, BackupEntry, BootstrapResult, EnvironmentStatus, ToolStatus } from "../types";
 import { ConfirmPanel } from "./ConfirmPanel";
@@ -45,6 +45,8 @@ export function SettingsPage({ locale, result, onLocaleChange, onEnvironment, on
   const [notice, setNotice] = useState<string | null>(null);
   const [savingResident, setSavingResident] = useState(false);
   const [savingGui, setSavingGui] = useState(false);
+  const [savingAiNotifications, setSavingAiNotifications] = useState(false);
+  const [savingStatusNotifications, setSavingStatusNotifications] = useState(false);
   const [guiWarning, setGuiWarning] = useState<string | null>(null);
   const [autostart, setAutostart] = useState<boolean | null>(null);
   const [savingAutostart, setSavingAutostart] = useState(false);
@@ -88,6 +90,22 @@ export function SettingsPage({ locale, result, onLocaleChange, onEnvironment, on
     try { onSettingsChange(await setGuiConfirmation(enabled)); setGuiWarning(await guiConfirmationStatus()); }
     catch (reason) { setError(String(reason)); }
     finally { setSavingGui(false); }
+  };
+
+  const changeAiNotifications = async (value: "off" | "github" | "all") => {
+    setSavingAiNotifications(true);
+    setError(null);
+    try { onSettingsChange(await setAiNotifications(value)); }
+    catch (reason) { setError(String(reason)); }
+    finally { setSavingAiNotifications(false); }
+  };
+
+  const changeStatusNotifications = async (enabled: boolean) => {
+    setSavingStatusNotifications(true);
+    setError(null);
+    try { onSettingsChange(await setStatusNotifications(enabled)); }
+    catch (reason) { setError(String(reason)); }
+    finally { setSavingStatusNotifications(false); }
   };
 
   const recheck = async () => {
@@ -154,6 +172,8 @@ export function SettingsPage({ locale, result, onLocaleChange, onEnvironment, on
       <h2 id="settings-resident">{copy.resident}</h2>
       <div className="ui-settings-resident">
         <label className="ui-check"><input type="checkbox" checked={result.data.settings.closeToTray ?? true} disabled={savingResident} onChange={(event) => void changeResident(event.currentTarget.checked)} />{copy.closeToTray}</label>
+        <label className="ui-settings-choice" htmlFor="settings-ai-notifications"><span>{copy.aiNotifications}</span><select id="settings-ai-notifications" value={result.data.settings.aiNotifications ?? "github"} disabled={savingAiNotifications} onChange={(event) => void changeAiNotifications(event.currentTarget.value as "off" | "github" | "all")}><option value="off">{copy.aiNotificationsOff}</option><option value="github">{copy.aiNotificationsGithub}</option><option value="all">{copy.aiNotificationsAll}</option></select></label>
+        <label className="ui-check"><input type="checkbox" checked={result.data.settings.statusNotifications ?? true} disabled={savingStatusNotifications} onChange={(event) => void changeStatusNotifications(event.currentTarget.checked)} />{copy.statusNotifications}</label>
         <label className="ui-check"><input type="checkbox" checked={result.data.settings.guiConfirmation ?? true} disabled={savingGui} onChange={(event) => void changeGui(event.currentTarget.checked)} />{copy.guiConfirmation}</label>
         {guiWarning && <p className="ui-caution" role="status">{copy.guiUnavailable} ({guiWarning})</p>}
         {showAutostart && <label className="ui-check"><input type="checkbox" checked={autostart ?? false} disabled={autostart === null || savingAutostart} onChange={(event) => void changeAutostart(event.currentTarget.checked)} />{copy.autostart}</label>}

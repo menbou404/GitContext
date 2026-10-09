@@ -3,11 +3,11 @@ use crate::{
     git_ops,
     github::*,
     models::{
-        normalize_profile, validate_profile, AppData, AppSettings, ApplyPreview, AutoApprove,
-        BootstrapResult, BranchResult, CloneResult, CommitPreview, CommitResult, GhProfileStatus,
-        GithubRepository, MergePullRequestResult, Profile, ProfileAutoApprove, PublishResult,
-        PullRequestManagement, PullRequestPreview, PullRequestResult, PushPreview, PushResult,
-        RepositoryRecord, SyncPreview,
+        normalize_profile, validate_profile, AiNotifications, AppData, AppSettings, ApplyPreview,
+        AutoApprove, BootstrapResult, BranchResult, CloneResult, CommitPreview, CommitResult,
+        GhProfileStatus, GithubRepository, MergePullRequestResult, Profile, ProfileAutoApprove,
+        PublishResult, PullRequestManagement, PullRequestPreview, PullRequestResult, PushPreview,
+        PushResult, RepositoryRecord, SyncPreview,
     },
     storage::{development_data, StateStore},
 };
@@ -59,6 +59,29 @@ pub fn set_gui_confirmation(store: &StateStore, enabled: bool) -> Result<AppSett
     let mut data = store.load()?;
     data.settings.gui_confirmation = enabled;
     store.save(&data)?;
+    Ok(data.settings)
+}
+
+pub fn set_ai_notifications(
+    store: &StateStore,
+    value: AiNotifications,
+) -> Result<AppSettings, String> {
+    let _guard = store.lock()?;
+    let mut data = store.load()?;
+    if data.settings.ai_notifications != value {
+        data.settings.ai_notifications = value;
+        store.save(&data)?;
+    }
+    Ok(data.settings)
+}
+
+pub fn set_status_notifications(store: &StateStore, enabled: bool) -> Result<AppSettings, String> {
+    let _guard = store.lock()?;
+    let mut data = store.load()?;
+    if data.settings.status_notifications != enabled {
+        data.settings.status_notifications = enabled;
+        store.save(&data)?;
+    }
     Ok(data.settings)
 }
 

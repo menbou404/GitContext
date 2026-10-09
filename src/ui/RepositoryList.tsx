@@ -6,7 +6,7 @@ import { ProfileDot } from "./ProfileDot";
 import { StatusLabel } from "./StatusLabel";
 import { filterRepositories, type RepositoryFilter } from "./status";
 
-export function RepositoryList({ repositories, profiles, statuses, locale, busy, refreshing, refreshedAt, onOpen, onAdd, onClone, onRefresh }: {
+export function RepositoryList({ repositories, profiles, statuses, locale, busy, refreshing, refreshedAt, initialFilter = "all", onOpen, onAdd, onClone, onRefresh }: {
   repositories: RepositoryRecord[];
   profiles: Profile[];
   statuses: Record<string, RepositoryStatus>;
@@ -14,6 +14,7 @@ export function RepositoryList({ repositories, profiles, statuses, locale, busy,
   busy: boolean;
   refreshing: boolean;
   refreshedAt: Date | null;
+  initialFilter?: RepositoryFilter;
   onOpen: (id: string) => void;
   onAdd: () => void;
   onClone: () => void;
@@ -21,7 +22,7 @@ export function RepositoryList({ repositories, profiles, statuses, locale, busy,
 }) {
   const copy = shellCopy[locale];
   const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState<RepositoryFilter>("all");
+  const [filter, setFilter] = useState<RepositoryFilter>(initialFilter);
   const visible = filterRepositories(repositories, profiles, statuses, query, filter);
   const counts = {
     all: repositories.length,

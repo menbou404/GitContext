@@ -173,6 +173,11 @@ export const settingsCopy = {
   en: {
     title: "Settings", environment: "Environment", language: "Language", resident: "Background", data: "Data",
     closeToTray: "Keep GitContext in the notification area when closing the window",
+    aiNotifications: "Notify about AI operations",
+    aiNotificationsOff: "Off",
+    aiNotificationsGithub: "GitHub operations",
+    aiNotificationsAll: "All operations",
+    statusNotifications: "Notify when repositories need attention",
     guiConfirmation: "Confirm operations from AI clients without a confirmation screen in GitContext",
     guiUnavailable: "GUI confirmation is unavailable. Restart GitContext and check for another process using its approval pipe.",
     autostart: "Start when signing in to Windows",
@@ -192,6 +197,11 @@ export const settingsCopy = {
   ja: {
     title: "設定", environment: "環境", language: "言語", resident: "常駐", data: "データ",
     closeToTray: "ウィンドウを閉じても通知領域に残す",
+    aiNotifications: "AIによる操作を通知する",
+    aiNotificationsOff: "通知しない",
+    aiNotificationsGithub: "GitHub操作のみ",
+    aiNotificationsAll: "すべての操作",
+    statusNotifications: "要対応のリポジトリを通知する",
     guiConfirmation: "確認画面を出せないAIクライアントの操作を、GitContextで確認する",
     guiUnavailable: "画面での確認を利用できません。GitContextを再起動し、確認用パイプを使用中のプロセスがないか確認してください。",
     autostart: "Windowsへのサインイン時に起動する",

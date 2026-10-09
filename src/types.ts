@@ -71,6 +71,8 @@ export interface AppSettings {
   aiIntegrationNoticeDismissed?: boolean;
   closeToTray?: boolean;
   guiConfirmation?: boolean;
+  aiNotifications?: "off" | "github" | "all";
+  statusNotifications?: boolean;
 }
 
 export interface ToolStatus {
