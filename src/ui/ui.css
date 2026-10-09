@@ -120,6 +120,10 @@ html, body, #root { min-width: 1050px; }
 .ui-auto-approve label { display: flex; align-items: flex-start; gap: 8px; }
 .ui-auto-approve input { margin-top: 4px; }
 .ui-risk { color: var(--ui-danger); font-size: 12px; }
+.ui-new-repository-defaults { display: flex; flex-direction: column; gap: 10px; }
+.ui-new-repository-defaults ul { list-style: none; padding: 0; margin: 0; }
+.ui-new-repository-defaults li { display: flex; align-items: center; gap: 12px; overflow-wrap: anywhere; }
+.ui-visibility-options { display: flex; flex-direction: column; gap: 6px; padding-left: 20px; }
 .ui-review > p { margin: 0 0 12px; }
 .ui-changes { border: 1px solid var(--ui-line); border-radius: 6px; }
 .ui-changes > div { display: grid; grid-template-columns: 170px 1fr; gap: 12px; padding: 9px 12px; border-bottom: 1px solid var(--ui-line-soft); }

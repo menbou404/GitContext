@@ -221,6 +221,7 @@ pub fn inspect_repository(input: &str) -> Result<RepositoryRecord, String> {
         profile_id: None,
         last_applied_at: None,
         auto_approve: Default::default(),
+        auto_approve_source: None,
     })
 }
 
@@ -996,6 +997,7 @@ mod tests {
             profile_id: None,
             last_applied_at: None,
             auto_approve: Default::default(),
+            auto_approve_source: None,
         };
         let profile = Profile {
             id: "test-profile".into(),
@@ -1358,6 +1360,7 @@ mod tests {
             profile_id: Some("test-profile".into()),
             last_applied_at: Some("now".into()),
             auto_approve: Default::default(),
+            auto_approve_source: None,
         };
         let profile = Profile {
             id: "test-profile".into(),

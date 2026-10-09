@@ -4,17 +4,19 @@ use crate::{
     github::*,
     models::{
         normalize_profile, validate_profile, AiNotifications, AppData, AppSettings, ApplyPreview,
-        AutoApprove, BootstrapResult, BranchResult, CloneResult, CommitPreview, CommitResult,
-        GhProfileStatus, GithubRepository, MergePullRequestResult, Profile, ProfileAutoApprove,
-        PublishResult, PullRequestManagement, PullRequestPreview, PullRequestResult, PushPreview,
-        PushResult, RepositoryRecord, SyncPreview,
+        AutoApprove, AutoApproveSource, BootstrapResult, BranchResult, CloneResult, CommitPreview,
+        CommitResult, GhProfileStatus, GithubRepository, MergePullRequestResult,
+        NewRepositoryDefaults, Profile, ProfileAutoApprove, PublishResult, PullRequestManagement,
+        PullRequestPreview, PullRequestResult, PushPreview, PushResult, RepositoryRecord,
+        SyncPreview,
     },
     storage::{development_data, StateStore},
 };
 use chrono::Utc;
+use serde::Serialize;
 use std::{
     fs,
-    path::Path,
+    path::{Path, PathBuf},
     process::Stdio,
     sync::{atomic::AtomicBool, Arc},
 };
@@ -228,6 +230,7 @@ pub fn set_repository_auto_approve(
         .find(|item| item.id == repository_id)
         .ok_or_else(|| "Repository was not found.".to_string())?;
     repository.auto_approve = auto_approve;
+    repository.auto_approve_source = None;
     store.save(&data)?;
     Ok(data)
 }
@@ -244,7 +247,221 @@ pub fn set_profile_auto_approve(
         .iter_mut()
         .find(|item| item.id == profile_id)
         .ok_or_else(|| "Profile was not found.".to_string())?;
-    profile.auto_approve = auto_approve;
+    profile.auto_approve.clone_repository = auto_approve.clone_repository;
+    store.save(&data)?;
+    Ok(data)
+}
+
+pub fn set_new_repository_defaults(
+    store: &StateStore,
+    profile_id: String,
+    defaults: NewRepositoryDefaults,
+) -> Result<AppData, String> {
+    let _guard = store.lock()?;
+    let mut data = store.load()?;
+    let profile = data
+        .profiles
+        .iter_mut()
+        .find(|p| p.id == profile_id)
+        .ok_or("Profile was not found.")?;
+    profile.auto_approve.new_repository = defaults;
+    store.save(&data)?;
+    Ok(data)
+}
+
+fn path_parts(path: &str) -> Vec<String> {
+    let path = path.replace('\\', "/");
+    let path = path.strip_prefix("//?/").unwrap_or(&path);
+    let windows = path.as_bytes().get(1) == Some(&b':') || path.starts_with("//");
+    path.split('/')
+        .filter(|part| !part.is_empty() && *part != ".")
+        .map(|part| {
+            if cfg!(windows) || windows {
+                part.to_lowercase()
+            } else {
+                part.to_string()
+            }
+        })
+        .collect()
+}
+
+fn path_within(path: &str, folder: &str) -> bool {
+    let child = path_parts(path);
+    let parent = path_parts(folder);
+    child.len() >= parent.len() && child.starts_with(&parent)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FolderRule {
+    None,
+    Profile(String),
+    Ambiguous,
+}
+
+pub fn folder_rule(path: &str, profiles: &[Profile]) -> FolderRule {
+    let mut best = 0;
+    let mut matches = Vec::new();
+    for profile in profiles {
+        for folder in &profile.auto_approve.new_repository_folders {
+            let depth = path_parts(folder).len();
+            if depth > 0 && path_within(path, folder) {
+                if depth > best {
+                    best = depth;
+                    matches.clear();
+                }
+                if depth == best && !matches.contains(&profile.id) {
+                    matches.push(profile.id.clone());
+                }
+            }
+        }
+    }
+    match matches.len() {
+        0 => FolderRule::None,
+        1 => FolderRule::Profile(matches.remove(0)),
+        _ => FolderRule::Ambiguous,
+    }
+}
+
+fn origin_owner(origin: &str) -> Option<&str> {
+    let path = origin
+        .strip_prefix("git@github.com:")?
+        .strip_suffix(".git")?;
+    let (owner, repo) = path.split_once('/')?;
+    (!owner.is_empty() && !repo.is_empty() && !repo.contains('/')).then_some(owner)
+}
+
+pub fn origin_profile_candidates(
+    repository: &RepositoryRecord,
+    profiles: &[Profile],
+) -> Vec<String> {
+    repository
+        .remote_url
+        .as_deref()
+        .and_then(origin_owner)
+        .map(|owner| {
+            profiles
+                .iter()
+                .filter(|p| {
+                    p.github_username
+                        .as_deref()
+                        .is_some_and(|name| name.eq_ignore_ascii_case(owner))
+                })
+                .map(|p| p.id.clone())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AssignmentDecision {
+    Automatic,
+    NeedsConfirmation,
+    Existing,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssignmentChoice {
+    pub profile_id: Option<String>,
+    pub decision: AssignmentDecision,
+    pub inherit_defaults: bool,
+    pub reason: String,
+}
+
+pub fn assignment_choice(
+    repository: &RepositoryRecord,
+    profiles: &[Profile],
+    requested_profile_id: Option<&str>,
+) -> AssignmentChoice {
+    if repository.profile_id.is_some() || repository.last_applied_at.is_some() {
+        return AssignmentChoice { profile_id: requested_profile_id.map(str::to_owned), decision: AssignmentDecision::Existing,
+            inherit_defaults: false, reason: "Existing repository assignment uses the selected Profile without inheriting defaults.".into() };
+    }
+    let rule = folder_rule(&repository.path, profiles);
+    let candidates = origin_profile_candidates(repository, profiles);
+    let conflict = matches!(&rule, FolderRule::Profile(id) if !candidates.is_empty() && !candidates.contains(id));
+    if let FolderRule::Profile(id) = &rule {
+        if !conflict && requested_profile_id.is_none_or(|requested| requested == id) {
+            return AssignmentChoice { profile_id: Some(id.clone()), decision: AssignmentDecision::Automatic,
+                inherit_defaults: true, reason: "A single folder rule matches the new repository and agrees with the requested Profile and origin.".into() };
+        }
+    }
+    let reason = if conflict {
+        "The folder rule conflicts with the origin owner."
+    } else if matches!(rule, FolderRule::Ambiguous) {
+        "Multiple Profiles have equally specific folder rules."
+    } else if matches!(rule, FolderRule::None) {
+        "No folder rule matches this repository."
+    } else {
+        "The requested Profile differs from the folder rule."
+    };
+    AssignmentChoice {
+        profile_id: requested_profile_id.map(str::to_owned),
+        decision: AssignmentDecision::NeedsConfirmation,
+        inherit_defaults: false,
+        reason: reason.into(),
+    }
+}
+
+pub fn add_new_repository_folder(
+    store: &StateStore,
+    profile_id: String,
+    folder: String,
+) -> Result<AppData, String> {
+    let path = PathBuf::from(&folder);
+    if !path.is_absolute() || path_parts(&folder).iter().any(|part| part == "..") {
+        return Err("Choose an absolute folder under your home directory.".into());
+    }
+    let path = fs::canonicalize(&path)
+        .map_err(|_| "Choose an existing folder under your home directory.")?;
+    let home = std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .ok_or("Home directory is unavailable.")?;
+    let home = fs::canonicalize(home).map_err(|_| "Home directory is unavailable.")?;
+    let folder = path.to_string_lossy().into_owned();
+    let home = home.to_string_lossy();
+    let depth = path_parts(&folder).len();
+    if !path_within(&folder, &home) || depth <= path_parts(&home).len() {
+        return Err(
+            "Choose a folder below your home directory, not the home or drive root.".into(),
+        );
+    }
+    let _guard = store.lock()?;
+    let mut data = store.load()?;
+    let profile = data
+        .profiles
+        .iter_mut()
+        .find(|p| p.id == profile_id)
+        .ok_or("Profile was not found.")?;
+    if !profile
+        .auto_approve
+        .new_repository_folders
+        .iter()
+        .any(|item| path_parts(item) == path_parts(&folder))
+    {
+        profile.auto_approve.new_repository_folders.push(folder);
+        store.save(&data)?;
+    }
+    Ok(data)
+}
+
+pub fn remove_new_repository_folder(
+    store: &StateStore,
+    profile_id: String,
+    folder: String,
+) -> Result<AppData, String> {
+    let _guard = store.lock()?;
+    let mut data = store.load()?;
+    let profile = data
+        .profiles
+        .iter_mut()
+        .find(|p| p.id == profile_id)
+        .ok_or("Profile was not found.")?;
+    profile
+        .auto_approve
+        .new_repository_folders
+        .retain(|item| path_parts(item) != path_parts(&folder));
     store.save(&data)?;
     Ok(data)
 }
@@ -479,6 +696,43 @@ pub fn apply_profile(
         .ok_or_else(|| "Repository was not found.".to_string())?;
     target.profile_id = Some(profile_id);
     target.last_applied_at = Some(Utc::now().to_rfc3339());
+    store.save(&data)?;
+    Ok(data)
+}
+
+pub fn apply_profile_with_defaults(
+    store: &StateStore,
+    repository_id: String,
+    profile_id: String,
+) -> Result<AppData, String> {
+    let _guard = store.lock()?;
+    let mut data = store.load()?;
+    let (repository, profile) = find_assignment(&data, &repository_id, &profile_id)?;
+    let mut current_repository = repository.clone();
+    current_repository.remote_url = git_ops::origin_url(&repository.path).ok();
+    let choice = assignment_choice(&current_repository, &data.profiles, Some(&profile_id));
+    if choice.decision != AssignmentDecision::Automatic {
+        return Err(format!(
+            "{} Ask the user which Profile to use, or assign it in GitContext.",
+            choice.reason
+        ));
+    }
+    validate_profile(profile)?;
+    git_ops::apply_profile(repository, profile)?;
+    let defaults = AutoApprove::from(&profile.auto_approve.new_repository);
+    let applied_at = Utc::now().to_rfc3339();
+    let target = data
+        .repositories
+        .iter_mut()
+        .find(|item| item.id == repository_id)
+        .ok_or("Repository was not found.")?;
+    target.profile_id = Some(profile_id.clone());
+    target.last_applied_at = Some(applied_at.clone());
+    target.auto_approve = defaults;
+    target.auto_approve_source = Some(AutoApproveSource {
+        profile_id,
+        applied_at,
+    });
     store.save(&data)?;
     Ok(data)
 }
@@ -1138,6 +1392,120 @@ fn find_assignment<'a>(
 }
 
 #[cfg(test)]
+mod new_repository_tests {
+    use super::*;
+
+    fn profile(id: &str, folders: &[&str], owner: Option<&str>) -> Profile {
+        Profile {
+            id: id.into(),
+            label: id.into(),
+            accent: "#112233".into(),
+            git_name: "Example".into(),
+            git_email: "example@example.com".into(),
+            github_username: owner.map(str::to_owned),
+            ssh_key_path: None,
+            gh_config_dir: None,
+            auto_approve: ProfileAutoApprove {
+                new_repository_folders: folders.iter().map(|s| s.to_string()).collect(),
+                ..Default::default()
+            },
+        }
+    }
+
+    fn repository(path: &str) -> RepositoryRecord {
+        RepositoryRecord {
+            id: "r".into(),
+            name: "r".into(),
+            path: path.into(),
+            remote_url: None,
+            branch: None,
+            profile_id: None,
+            last_applied_at: None,
+            auto_approve: AutoApprove::default(),
+            auto_approve_source: None,
+        }
+    }
+
+    #[test]
+    fn folder_rule_uses_components_depth_and_windows_normalization() {
+        let profiles = vec![
+            profile("a", &[r"C:\Work\"], None),
+            profile("b", &[r"\\?\C:\Work\Deep"], None),
+        ];
+        assert_eq!(
+            folder_rule(r"c:\WORK\deep\repo", &profiles),
+            FolderRule::Profile("b".into())
+        );
+        assert_eq!(folder_rule(r"C:\Work2\repo", &profiles), FolderRule::None);
+        let tied = vec![
+            profile("a", &[r"C:\Work"], None),
+            profile("b", &[r"\\?\C:\work\"], None),
+        ];
+        assert_eq!(folder_rule(r"C:\Work\repo", &tied), FolderRule::Ambiguous);
+    }
+
+    #[test]
+    fn assignment_requires_new_matching_unambiguous_rule() {
+        let profiles = vec![
+            profile("a", &[r"C:\Work"], Some("alice")),
+            profile("b", &[r"C:\Other"], Some("bob")),
+        ];
+        let mut repo = repository(r"C:\Work\repo");
+        assert_eq!(
+            assignment_choice(&repo, &profiles, None).decision,
+            AssignmentDecision::Automatic
+        );
+        assert!(assignment_choice(&repo, &profiles, None).inherit_defaults);
+        assert_eq!(
+            assignment_choice(&repo, &profiles, Some("b")).decision,
+            AssignmentDecision::NeedsConfirmation
+        );
+        repo.remote_url = Some("git@github.com:bob/repo.git".into());
+        assert_eq!(
+            assignment_choice(&repo, &profiles, Some("a")).decision,
+            AssignmentDecision::NeedsConfirmation
+        );
+        repo.remote_url = None;
+        repo.profile_id = Some("a".into());
+        assert_eq!(
+            assignment_choice(&repo, &profiles, Some("a")).decision,
+            AssignmentDecision::Existing
+        );
+        assert!(!assignment_choice(&repo, &profiles, Some("a")).inherit_defaults);
+        repo.profile_id = None;
+        repo.last_applied_at = Some("earlier".into());
+        assert_eq!(
+            assignment_choice(&repo, &profiles, Some("a")).decision,
+            AssignmentDecision::Existing
+        );
+        repo.last_applied_at = None;
+        repo.path = r"C:\Outside\repo".into();
+        assert_eq!(
+            assignment_choice(&repo, &profiles, Some("a")).decision,
+            AssignmentDecision::NeedsConfirmation
+        );
+    }
+
+    #[test]
+    fn rejects_folders_outside_home_and_home_itself() {
+        let store = StateStore::new(
+            std::env::temp_dir().join(format!("gitcontext-folder-test-{}", uuid::Uuid::new_v4())),
+        );
+        assert!(add_new_repository_folder(&store, "missing".into(), "relative".into()).is_err());
+        let home = std::env::var_os("USERPROFILE")
+            .or_else(|| std::env::var_os("HOME"))
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        assert!(add_new_repository_folder(&store, "missing".into(), home).is_err());
+        let root = if cfg!(windows) { r"C:\" } else { "/" };
+        assert!(add_new_repository_folder(&store, "missing".into(), root.into()).is_err());
+        let outside = if cfg!(windows) { r"C:\Windows" } else { "/etc" };
+        assert!(add_new_repository_folder(&store, "missing".into(), outside.into()).is_err());
+    }
+}
+
+#[cfg(test)]
 mod auto_approve_tests {
     use super::*;
     use std::{path::Path, process::Command};
@@ -1154,6 +1522,77 @@ mod auto_approve_tests {
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
+    }
+
+    #[test]
+    fn inherited_defaults_are_traced_and_gui_change_clears_source() {
+        let root =
+            std::env::temp_dir().join(format!("gitcontext-inherit-{}", uuid::Uuid::new_v4()));
+        let repo = root.join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        git(&repo, &["init", "-b", "main"]);
+        let store = StateStore::new(root.join("data"));
+        let record = add_repository(&store, repo.to_string_lossy().into_owned()).unwrap();
+        let profile = Profile {
+            id: "sample".into(),
+            label: "Sample".into(),
+            accent: "#112233".into(),
+            git_name: "Example Person".into(),
+            git_email: "sample@example.com".into(),
+            github_username: None,
+            ssh_key_path: None,
+            gh_config_dir: None,
+            auto_approve: ProfileAutoApprove::default(),
+        };
+        save_profile(&store, profile).unwrap();
+        let mut defaults = NewRepositoryDefaults {
+            push_work_branch: true,
+            ..Default::default()
+        };
+        defaults.publish_visibility = crate::models::PublishVisibility::Any;
+        set_new_repository_defaults(&store, "sample".into(), defaults).unwrap();
+        // Test state can store a rule outside the real user's home; the GUI setter validates additions.
+        let mut state = store.load().unwrap();
+        state.profiles[0].auto_approve.new_repository_folders.push(
+            fs::canonicalize(&root)
+                .unwrap()
+                .to_string_lossy()
+                .into_owned(),
+        );
+        store.save(&state).unwrap();
+        let mut edited = state.profiles[0].clone();
+        edited.label = "Edited".into();
+        edited.auto_approve = ProfileAutoApprove::default();
+        let saved = save_profile(&store, edited).unwrap();
+        assert_eq!(
+            saved.profiles[0].auto_approve.new_repository_folders.len(),
+            1
+        );
+        assert!(
+            saved.profiles[0]
+                .auto_approve
+                .new_repository
+                .push_work_branch
+        );
+        let applied =
+            apply_profile_with_defaults(&store, record.id.clone(), "sample".into()).unwrap();
+        assert!(applied.repositories[0].auto_approve.push_work_branch);
+        assert_eq!(
+            applied.repositories[0].auto_approve.publish_visibility,
+            crate::models::PublishVisibility::Any
+        );
+        assert_eq!(
+            applied.repositories[0]
+                .auto_approve_source
+                .as_ref()
+                .unwrap()
+                .profile_id,
+            "sample"
+        );
+        let changed =
+            set_repository_auto_approve(&store, record.id, AutoApprove::default()).unwrap();
+        assert!(changed.repositories[0].auto_approve_source.is_none());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -1248,6 +1687,7 @@ mod auto_approve_tests {
             "sample".into(),
             ProfileAutoApprove {
                 clone_repository: true,
+                ..Default::default()
             },
         )
         .unwrap();

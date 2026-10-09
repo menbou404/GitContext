@@ -17,6 +17,7 @@ GitContextは、複数のGitHub作業Identityをリポジトリ単位で割り�
 - ProfileごとにGitHub CLIのブラウザ認証を分離
 - Gitの`user.name` / `user.email`と既存SSH鍵をまとめて管理
 - リポジトリごとのProfile割り当てと適用前レビュー
+- 新規登録リポジトリのフォルダ規則とProfile別の自動承認既定値。規則で一意に決まる場合だけMCPから自動で割り当て、既定値を引き継ぎます。規則外・曖昧な場合は適用せず理由を案内します。
 - ProfileのGitHub一覧またはSSH URLから安全にcloneし、自動でIdentityを適用
 - repository-localな`.git/config`だけを更新
 - GitHubリポジトリ作成、`origin`設定、初回push

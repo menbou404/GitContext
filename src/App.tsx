@@ -3,6 +3,7 @@ import { isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
   addRepository,
+  addNewRepositoryFolder,
   applyAssignment,
   bootstrap,
   chooseCloneDestinationDirectory,
@@ -15,11 +16,13 @@ import {
   listAiClients,
   previewAssignment,
   removeRepository,
+  removeNewRepositoryFolder,
   reportRepositoryStatuses,
   saveProfile,
   setLocale,
   setProfileAutoApprove,
   setRepositoryAutoApprove,
+  setNewRepositoryDefaults,
 } from "./backend";
 import {
   AlertIcon,
@@ -27,7 +30,7 @@ import {
   CloseIcon,
   SearchIcon,
 } from "./Icons";
-import type { AiInventory, AppData, ApplyPreview, AutoApprove, BootstrapResult, CloneOptions, GhProfileStatus, GithubRepository, Profile } from "./types";
+import type { AiInventory, AppData, ApplyPreview, AutoApprove, BootstrapResult, CloneOptions, GhProfileStatus, GithubRepository, NewRepositoryDefaults, Profile } from "./types";
 import type { RepositoryStatus } from "./types";
 import { initials, profileIsComplete } from "./types";
 import { localizeRuntimeMessage, shellCopy, uiCopy, type Locale } from "./i18n";
@@ -481,7 +484,17 @@ function App({ previewLocale }: { previewLocale?: Locale }) {
     updateData(nextData);
   };
 
-  const updateAutoApprove = async (field: keyof AutoApprove, enabled: boolean) => {
+  const updateDefaults = async (profileId: string, defaults: NewRepositoryDefaults) => {
+    updateData(await setNewRepositoryDefaults(profileId, defaults));
+  };
+  const addAutomationFolder = async (profileId: string, folder: string) => {
+    updateData(await addNewRepositoryFolder(profileId, folder));
+  };
+  const removeAutomationFolder = async (profileId: string, folder: string) => {
+    updateData(await removeNewRepositoryFolder(profileId, folder));
+  };
+
+  const updateAutoApprove = async (field: keyof AutoApprove, enabled: boolean | "private" | "any") => {
     if (!selectedRepository || busy) return;
     setBusy(true);
     setNotice(null);
@@ -575,7 +588,7 @@ function App({ previewLocale }: { previewLocale?: Locale }) {
       {page === "settings" ? <SettingsPage locale={locale} result={result} onLocaleChange={changeLocale} onEnvironment={(nextEnvironment) => setResult((current) => current ? { ...current, environment: nextEnvironment } : current)} onSettingsChange={(settings) => setResult((current) => current ? { ...current, data: { ...current.data, settings } } : current)} onRestored={(nextResult) => { setResult(nextResult); setSelectedRepositoryId(null); setStatuses({}); setProfileStatuses({}); checkedProfiles.current.clear(); updateLocale(previewLocale ?? resolveLocale(nextResult.data.settings?.locale, navigator.language)); }} />
         : page === "history" ? <HistoryPage data={data} locale={locale} />
         : page === "ai" ? <AiIntegrationPage locale={locale} />
-        : page === "profiles" ? editingProfile ? <ProfileEditor key={editingProfile.profile.id} initial={editingProfile.profile} creating={editingProfile.creating} ghAvailable={environment.gh.available} locale={locale} initialStatus={currentProfileStatuses[editingProfile.profile.id]} onStatus={(id, status) => setProfileStatuses((current) => ({ ...current, [id]: status }))} onClose={() => setEditingProfile(null)} onSave={saveProfileAction} onAutoApprove={updateProfileAutoApprove} /> : data.repositories.length === 0 ? <div className="ui-page">{firstRunGuide}{data.profiles.length > 0 && profileList}</div> : profileList
+        : page === "profiles" ? editingProfile ? <ProfileEditor key={editingProfile.profile.id} initial={editingProfile.profile} creating={editingProfile.creating} ghAvailable={environment.gh.available} locale={locale} initialStatus={currentProfileStatuses[editingProfile.profile.id]} onStatus={(id, status) => setProfileStatuses((current) => ({ ...current, [id]: status }))} onClose={() => setEditingProfile(null)} onSave={saveProfileAction} onAutoApprove={updateProfileAutoApprove} onDefaults={updateDefaults} onAddFolder={addAutomationFolder} onRemoveFolder={removeAutomationFolder} /> : data.repositories.length === 0 ? <div className="ui-page">{firstRunGuide}{data.profiles.length > 0 && profileList}</div> : profileList
         : selectedRepository ? <RepositoryDetail key={selectedRepository.id} repository={selectedRepository} profiles={data.profiles} status={selectedStatus} pendingProfileId={pendingProfileId} preview={preview} locale={locale} busy={busy} removing={removeConfirmingId === selectedRepository.id}
         onBack={() => { setSelectedRepositoryId(null); setPreview(null); setNotice(null); }} onPendingProfile={setPendingProfileId} onReview={reviewAssignment} onCancelReview={() => setPreview(null)} onApply={applyProfileAction} onAutoApprove={updateAutoApprove}
         onStartRemove={() => setRemoveConfirmingId(selectedRepository.id)} onCancelRemove={() => setRemoveConfirmingId(null)} onRemove={removeSelected}

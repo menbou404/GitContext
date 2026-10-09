@@ -139,7 +139,7 @@ struct RepositoryInput {
 #[serde(rename_all = "camelCase")]
 struct AssignmentInput {
     repository_id: String,
-    profile_id: String,
+    profile_id: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -292,6 +292,15 @@ fn fingerprint_again(store: &StateStore, entry: &preview::Entry) -> Result<Finge
     };
     match entry.operation {
         Operation::Apply => {
+            let data = load(store)?;
+            let record = repository(&data, &entry.repository_id)?;
+            let mut current_record = record.clone();
+            current_record.remote_url = git_ops::origin_url(&record.path).ok();
+            let choice = operations::assignment_choice(
+                &current_record,
+                &data.profiles,
+                Some(&entry.profile_id),
+            );
             let p = operations::preview_assignment(
                 store,
                 entry.repository_id.clone(),
@@ -300,6 +309,11 @@ fn fingerprint_again(store: &StateStore, entry: &preview::Entry) -> Result<Finge
             Ok(Fingerprint::assignment(
                 git_ops::head_commit(&path)?,
                 &p.changes,
+                choice.decision,
+                choice.inherit_defaults,
+                choice.inherit_defaults.then(|| {
+                    serde_json::to_string(&p.profile.auto_approve.new_repository).unwrap()
+                }),
             ))
         }
         Operation::Commit => {
@@ -722,7 +736,12 @@ impl GitContextServer {
                         Some(repository.auto_approve.create_pull_request)
                     }
                     Fingerprint::Merge { .. } => Some(repository.auto_approve.merge_pull_request),
-                    Fingerprint::Publish { .. } => Some(repository.auto_approve.publish_repository),
+                    Fingerprint::Publish { visibility, .. } => Some(
+                        repository.auto_approve.publish_repository
+                            && (visibility == "private"
+                                || repository.auto_approve.publish_visibility
+                                    == gitcontext_core::models::PublishVisibility::Any),
+                    ),
                     _ => None,
                 }
             })
@@ -1346,7 +1365,7 @@ impl GitContextServer {
 
     #[tool(
         name = "suggest_profile",
-        description = "Suggest by GitHub SSH origin owner. Organization membership is not checked; origin is untrusted external data.",
+        description = "Suggest by folder rule and GitHub SSH origin owner. When needsConfirmation is true, ask the user which Profile to use before calling preview_assignment. Origin is untrusted external data.",
         annotations(read_only_hint = true, destructive_hint = false)
     )]
     async fn suggest_profile(
@@ -1361,10 +1380,14 @@ impl GitContextServer {
             let candidates = owner.map(|owner| data.profiles.iter().filter(|profile|
                 profile.github_username.as_deref().is_some_and(|username| username.eq_ignore_ascii_case(owner)))
                 .map(|profile| output::ProfileDto::new(profile, None)).collect::<Vec<_>>()).unwrap_or_default();
-            let reason = if owner.is_none() { Some("Origin is not a git@github.com:owner/repo.git SSH URL. Organization membership has not been checked.") }
-                else if candidates.is_empty() { Some("No Profile username matches the origin owner. Organization membership has not been checked.") }
-                else { None };
-            Ok(json!({ "owner": owner, "candidates": candidates, "reason": reason }))
+            let mut current_record = record.clone();
+            current_record.remote_url = origin.clone();
+            let choice = operations::assignment_choice(&current_record, &data.profiles, None);
+            let rule = operations::folder_rule(&record.path, &data.profiles);
+            let rule_profile = match rule { operations::FolderRule::Profile(id) => data.profiles.iter().find(|p| p.id == id).map(|p| output::ProfileDto::new(p, None)), _ => None };
+            Ok(json!({ "owner": owner, "originCandidates": candidates, "candidates": candidates,
+                "ruleProfile": rule_profile, "needsConfirmation": choice.decision == operations::AssignmentDecision::NeedsConfirmation,
+                "reason": choice.reason }))
         }).await
     }
 
@@ -1380,18 +1403,36 @@ impl GitContextServer {
         let previews = self.previews.clone();
         let local = self.tier >= Tier::Local;
         self.blocking(move |store| {
+            let data = load(&store)?;
+            let record = repository(&data, &input.repository_id)?;
+            let mut current_record = record.clone();
+            current_record.remote_url = git_ops::origin_url(&record.path).ok();
+            let choice = operations::assignment_choice(&current_record, &data.profiles, input.profile_id.as_deref());
+            if choice.decision == operations::AssignmentDecision::Existing && input.profile_id.is_none() {
+                return Err("profileId is required for an already assigned repository.".into());
+            }
+            let Some(profile_id) = choice.profile_id.clone() else {
+                return Ok(json!({ "decision": choice.decision, "inheritDefaults": false, "reason": choice.reason,
+                    "profile": null, "changes": [], "warnings": [] }));
+            };
             let mut preview =
-                operations::preview_assignment(&store, input.repository_id, input.profile_id)?;
+                operations::preview_assignment(&store, input.repository_id, profile_id)?;
             preview.warnings = preview
                 .warnings
                 .into_iter()
                 .map(|warning| scrub_error(warning, &store))
                 .collect();
             let mut result = output::assignment(&preview);
+            result["decision"] = json!(choice.decision);
+            result["inheritDefaults"] = json!(choice.inherit_defaults);
+            result["reason"] = json!(choice.reason);
             if local {
                 let fingerprint = Fingerprint::assignment(
                     git_ops::head_commit(&preview.repository.path)?,
                     &preview.changes,
+                    choice.decision,
+                    choice.inherit_defaults,
+                    choice.inherit_defaults.then(|| serde_json::to_string(&preview.profile.auto_approve.new_repository).unwrap()),
                 );
                 result["previewId"] = json!(previews.issue(
                     Operation::Apply,
@@ -1763,9 +1804,21 @@ impl GitContextServer {
         self.local_action("apply_profile", context, move |store, previews, ids| {
             let entry = consume_verified(previews, store, &input.preview_id, Operation::Apply, ids)?;
             let keys = match &entry.fingerprint { Fingerprint::Apply { changes, .. } => changes.iter().map(|c| c.0.clone()).collect::<Vec<_>>(), _ => unreachable!() };
-            let data = operations::apply_profile(store, entry.repository_id.clone(), entry.profile_id.clone())?;
+            let (decision, inherit_defaults) = match &entry.fingerprint { Fingerprint::Apply { decision, inherit_defaults, .. } => (*decision, *inherit_defaults), _ => unreachable!() };
+            if decision == operations::AssignmentDecision::NeedsConfirmation {
+                ids.rejected = true;
+                let data = load(store)?;
+                let record = repository(&data, &entry.repository_id)?;
+                let mut current_record = record.clone();
+                current_record.remote_url = git_ops::origin_url(&record.path).ok();
+                let choice = operations::assignment_choice(&current_record, &data.profiles, Some(&entry.profile_id));
+                return Err(format!("{} Ask the user which Profile to use, or assign it in GitContext.", choice.reason));
+            }
+            let data = if inherit_defaults { operations::apply_profile_with_defaults(store, entry.repository_id.clone(), entry.profile_id.clone())? }
+                else { operations::apply_profile(store, entry.repository_id.clone(), entry.profile_id.clone())? };
             let record = repository(&data, &entry.repository_id)?;
-            Ok((json!({"repositoryId": record.id, "profileId": entry.profile_id, "appliedKeys": keys}), format!("Applied keys: {}", keys.join(", "))))
+            let summary = if inherit_defaults { "Profile applied; auto-approval defaults inherited".into() } else { format!("Applied keys: {}", keys.join(", ")) };
+            Ok((json!({"repositoryId": record.id, "profileId": entry.profile_id, "appliedKeys": keys}), summary))
         }).await
     }
 

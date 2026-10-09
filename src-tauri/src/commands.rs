@@ -302,6 +302,33 @@ pub fn set_profile_auto_approve(
 }
 
 #[tauri::command]
+pub fn set_new_repository_defaults(
+    store: State<'_, StateStore>,
+    profile_id: String,
+    defaults: gitcontext_core::models::NewRepositoryDefaults,
+) -> Result<AppData, String> {
+    operations::set_new_repository_defaults(&store, profile_id, defaults)
+}
+
+#[tauri::command]
+pub fn add_new_repository_folder(
+    store: State<'_, StateStore>,
+    profile_id: String,
+    folder: String,
+) -> Result<AppData, String> {
+    operations::add_new_repository_folder(&store, profile_id, folder)
+}
+
+#[tauri::command]
+pub fn remove_new_repository_folder(
+    store: State<'_, StateStore>,
+    profile_id: String,
+    folder: String,
+) -> Result<AppData, String> {
+    operations::remove_new_repository_folder(&store, profile_id, folder)
+}
+
+#[tauri::command]
 pub async fn list_github_repositories(
     store: State<'_, StateStore>,
     profile_id: String,

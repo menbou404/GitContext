@@ -23,7 +23,7 @@ export function RepositoryDetail({ repository, profiles, status, pendingProfileI
   repository: RepositoryRecord; profiles: Profile[]; status: RepositoryStatus | undefined;
   pendingProfileId: string; preview: ApplyPreview | null; locale: Locale; busy: boolean; removing: boolean;
   onBack: () => void; onPendingProfile: (id: string) => void; onReview: () => void; onCancelReview: () => void;
-  onApply: () => Promise<void>; onAutoApprove: (field: keyof AutoApprove, enabled: boolean) => void;
+  onApply: () => Promise<void>; onAutoApprove: (field: keyof AutoApprove, enabled: boolean | "private" | "any") => void;
   onStartRemove: () => void; onCancelRemove: () => void; onRemove: () => void;
   onData: (data: AppData) => void; onFinished: () => void;
 }) {

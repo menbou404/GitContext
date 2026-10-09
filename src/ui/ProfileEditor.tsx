@@ -1,12 +1,13 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { chooseGhConfigDirectory, chooseSshKey, connectGithubProfile, inspectGithubProfile, listenForGithubAuthPrompt, openGithubAuthPage } from "../backend";
+import { chooseAutomationFolder, chooseGhConfigDirectory, chooseSshKey, connectGithubProfile, inspectGithubProfile, listenForGithubAuthPrompt, openGithubAuthPage } from "../backend";
 import { AlertIcon, CheckIcon, ShieldIcon, TerminalIcon } from "../Icons";
 import { localizeRuntimeMessage, profileCopy, uiCopy, type Locale } from "../i18n";
-import type { GhProfileStatus, GithubAuthPrompt, Profile } from "../types";
+import type { GhProfileStatus, GithubAuthPrompt, NewRepositoryDefaults, Profile } from "../types";
 import { connectionFor } from "./profileStatus";
 
 const accents = ["#D8A33F", "#56A7D9", "#D97866", "#8E78D4", "#5CA989"];
 const messageFrom = (error: unknown, locale: Locale) => localizeRuntimeMessage(error instanceof Error ? error.message : String(error), locale);
+const emptyDefaults: NewRepositoryDefaults = { pushWorkBranch: false, pushDefaultBranch: false, createPullRequest: false, mergePullRequest: false, publishRepository: false, publishVisibility: "private" };
 
 export function ProfileEditor({
   initial,
@@ -16,6 +17,9 @@ export function ProfileEditor({
   onClose,
   onSave,
   onAutoApprove,
+  onDefaults,
+  onAddFolder,
+  onRemoveFolder,
   initialStatus,
   onStatus,
 }: {
@@ -26,6 +30,9 @@ export function ProfileEditor({
   onClose: () => void;
   onSave: (profile: Profile) => Promise<void>;
   onAutoApprove: (profileId: string, enabled: boolean) => Promise<void>;
+  onDefaults?: (profileId: string, defaults: NewRepositoryDefaults) => Promise<void>;
+  onAddFolder?: (profileId: string, folder: string) => Promise<void>;
+  onRemoveFolder?: (profileId: string, folder: string) => Promise<void>;
   initialStatus?: GhProfileStatus | null;
   onStatus?: (profileId: string, status: GhProfileStatus) => void;
 }) {
@@ -145,13 +152,38 @@ export function ProfileEditor({
     setAutoApproveSaving(true);
     try {
       await onAutoApprove(draft.id, enabled);
-      setDraft((current) => ({ ...current, autoApprove: { cloneRepository: enabled } }));
+      setDraft((current) => ({ ...current, autoApprove: { ...current.autoApprove, cloneRepository: enabled } }));
     } catch (cause) {
       setError(messageFrom(cause, locale));
     } finally {
       setAutoApproveSaving(false);
     }
   };
+
+  const saveDefaults = async (defaults: NewRepositoryDefaults) => {
+    setError(null); setAutoApproveSaving(true);
+    try {
+      await onDefaults?.(draft.id, defaults);
+      setDraft((current) => ({ ...current, autoApprove: { ...current.autoApprove, newRepository: defaults } }));
+    } catch (cause) { setError(messageFrom(cause, locale)); }
+    finally { setAutoApproveSaving(false); }
+  };
+  const changeFolder = async (remove?: string) => {
+    setError(null); setAutoApproveSaving(true);
+    try {
+      const folder = remove ?? await chooseAutomationFolder(copy.selectAutomationFolder);
+      if (!folder) return;
+      if (remove) await onRemoveFolder?.(draft.id, folder);
+      else await onAddFolder?.(draft.id, folder);
+      setDraft((current) => {
+        const folders = current.autoApprove.newRepositoryFolders ?? [];
+        return { ...current, autoApprove: { ...current.autoApprove,
+          newRepositoryFolders: remove ? folders.filter((item) => item !== folder) : folders.includes(folder) ? folders : [...folders, folder] } };
+      });
+    } catch (cause) { setError(messageFrom(cause, locale)); }
+    finally { setAutoApproveSaving(false); }
+  };
+  const defaults = draft.autoApprove.newRepository ?? emptyDefaults;
 
   return (
     <div className="ui-inline-editor">
@@ -252,6 +284,22 @@ export function ProfileEditor({
         {!creating && <fieldset className="auto-approve-settings" disabled={autoApproveSaving}>
           <legend>{copy.autoApproveTitle}</legend>
           <label><input type="checkbox" checked={draft.autoApprove.cloneRepository} onChange={(event) => updateCloneApproval(event.currentTarget.checked)} />{copy.autoApproveClone}</label>
+        </fieldset>}
+
+        {!creating && <fieldset className="auto-approve-settings ui-new-repository-defaults" disabled={autoApproveSaving}>
+          <legend>{copy.newRepositoryDefaults}</legend>
+          <p>{copy.automationFolders}</p>
+          <ul>{(draft.autoApprove.newRepositoryFolders ?? []).map((folder) => <li key={folder}><code>{folder}</code><button className="button button--ghost" type="button" onClick={() => changeFolder(folder)}>{copy.removeAction}</button></li>)}</ul>
+          <button className="button button--ghost" type="button" onClick={() => changeFolder()}>{copy.addAutomationFolder}</button>
+          <label><input type="checkbox" checked={defaults.pushWorkBranch} onChange={(event) => saveDefaults({ ...defaults, pushWorkBranch: event.currentTarget.checked })} />{copy.autoApprovePush}</label>
+          <label><input type="checkbox" checked={defaults.pushDefaultBranch} onChange={(event) => saveDefaults({ ...defaults, pushDefaultBranch: event.currentTarget.checked })} />{copy.autoApproveDefaultPush}<span className="ui-risk">{copy.autoApproveDefaultPushRisk}</span></label>
+          <label><input type="checkbox" checked={defaults.createPullRequest} onChange={(event) => saveDefaults({ ...defaults, createPullRequest: event.currentTarget.checked })} />{copy.autoApprovePullRequest}</label>
+          <label><input type="checkbox" checked={defaults.mergePullRequest} onChange={(event) => saveDefaults({ ...defaults, mergePullRequest: event.currentTarget.checked })} />{copy.autoApproveMerge}<span className="ui-risk">{copy.autoApproveMergeRisk}</span></label>
+          <label><input type="checkbox" checked={defaults.publishRepository} onChange={(event) => saveDefaults({ ...defaults, publishRepository: event.currentTarget.checked })} />{copy.autoApprovePublish}<span className="ui-risk">{copy.autoApprovePublishRisk}</span></label>
+          <div className="ui-visibility-options"><span>{copy.publishVisibility}</span>
+            <label><input type="radio" name="profile-publish-visibility" checked={defaults.publishVisibility === "private"} onChange={() => saveDefaults({ ...defaults, publishVisibility: "private" })} />{copy.publishPrivateOnly}</label>
+            <label><input type="radio" name="profile-publish-visibility" checked={defaults.publishVisibility === "any"} onChange={() => saveDefaults({ ...defaults, publishVisibility: "any" })} />{copy.publishAny}<span className="ui-risk">{copy.autoApprovePublishRisk}</span></label>
+          </div>
         </fieldset>}
 
         <div className="privacy-note">

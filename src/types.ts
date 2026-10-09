@@ -24,6 +24,18 @@ export interface AuditEntry {
 
 export interface ProfileAutoApprove {
   cloneRepository: boolean;
+  newRepositoryFolders?: string[];
+  newRepository?: NewRepositoryDefaults;
+}
+
+export type PublishVisibility = "private" | "any";
+export interface NewRepositoryDefaults {
+  pushWorkBranch: boolean;
+  pushDefaultBranch: boolean;
+  createPullRequest: boolean;
+  mergePullRequest: boolean;
+  publishRepository: boolean;
+  publishVisibility: PublishVisibility;
 }
 
 export interface RepositoryRecord {
@@ -35,6 +47,7 @@ export interface RepositoryRecord {
   profileId?: string | null;
   lastAppliedAt?: string | null;
   autoApprove: AutoApprove;
+  autoApproveSource?: { profileId: string; appliedAt: string } | null;
 }
 
 export type RepositoryState = "ready" | "reapply" | "unassigned" | "attention";
@@ -57,6 +70,7 @@ export interface AutoApprove {
   createPullRequest: boolean;
   mergePullRequest: boolean;
   publishRepository: boolean;
+  publishVisibility?: PublishVisibility;
 }
 
 export interface AppData {

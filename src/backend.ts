@@ -23,6 +23,7 @@ import type {
   MergePullRequestResult,
   Profile,
   ProfileAutoApprove,
+  NewRepositoryDefaults,
   PublishOptions,
   PublishResult,
   PullRequestCreateOptions,
@@ -249,6 +250,12 @@ export async function chooseRepositoryDirectory(title = "Select a Git repository
   return typeof selected === "string" ? selected : null;
 }
 
+export async function chooseAutomationFolder(title: string): Promise<string | null> {
+  if (!inDesktopApp()) return "C:\\Users\\you\\WebProjects";
+  const selected = await open({ directory: true, multiple: false, title });
+  return typeof selected === "string" ? selected : null;
+}
+
 export async function chooseCloneDestinationDirectory(title = "Select a clone destination"): Promise<string | null> {
   if (!inDesktopApp()) {
     return "C:\\Users\\you\\Projects";
@@ -318,6 +325,7 @@ export async function setRepositoryAutoApprove(repositoryId: string, autoApprove
     const repository = demoState.repositories.find((item) => item.id === repositoryId);
     if (!repository) throw new Error("Repository was not found.");
     repository.autoApprove = { ...autoApprove };
+    repository.autoApproveSource = null;
     return structuredClone(demoState);
   }
   return invoke<AppData>("set_repository_auto_approve", { repositoryId, autoApprove });
@@ -388,10 +396,41 @@ export async function setProfileAutoApprove(profileId: string, autoApprove: Prof
   if (!inDesktopApp()) {
     const profile = demoState.profiles.find((item) => item.id === profileId);
     if (!profile) throw new Error("Profile was not found.");
-    profile.autoApprove = { ...autoApprove };
+    profile.autoApprove = { ...profile.autoApprove, cloneRepository: autoApprove.cloneRepository };
     return structuredClone(demoState);
   }
   return invoke<AppData>("set_profile_auto_approve", { profileId, autoApprove });
+}
+
+export async function setNewRepositoryDefaults(profileId: string, defaults: NewRepositoryDefaults): Promise<AppData> {
+  if (!inDesktopApp()) {
+    const profile = demoState.profiles.find((item) => item.id === profileId);
+    if (!profile) throw new Error("Profile was not found.");
+    profile.autoApprove.newRepository = { ...defaults };
+    return structuredClone(demoState);
+  }
+  return invoke<AppData>("set_new_repository_defaults", { profileId, defaults });
+}
+
+export async function addNewRepositoryFolder(profileId: string, folder: string): Promise<AppData> {
+  if (!inDesktopApp()) {
+    const profile = demoState.profiles.find((item) => item.id === profileId);
+    if (!profile) throw new Error("Profile was not found.");
+    const folders = profile.autoApprove.newRepositoryFolders ?? [];
+    if (!folders.includes(folder)) profile.autoApprove.newRepositoryFolders = [...folders, folder];
+    return structuredClone(demoState);
+  }
+  return invoke<AppData>("add_new_repository_folder", { profileId, folder });
+}
+
+export async function removeNewRepositoryFolder(profileId: string, folder: string): Promise<AppData> {
+  if (!inDesktopApp()) {
+    const profile = demoState.profiles.find((item) => item.id === profileId);
+    if (!profile) throw new Error("Profile was not found.");
+    profile.autoApprove.newRepositoryFolders = (profile.autoApprove.newRepositoryFolders ?? []).filter((item) => item !== folder);
+    return structuredClone(demoState);
+  }
+  return invoke<AppData>("remove_new_repository_folder", { profileId, folder });
 }
 
 export async function inspectGithubProfile(
