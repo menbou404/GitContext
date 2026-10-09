@@ -122,6 +122,13 @@ impl Rpc {
         if let Some((pipe, executable)) = gui {
             command.env("GITCONTEXT_TEST_APPROVAL_PIPE", pipe);
             command.env("GITCONTEXT_TEST_APPROVAL_SERVER_EXE", executable);
+        } else {
+            // Never reach a GitContext GUI that may be running on the developer's machine.
+            command.env(
+                "GITCONTEXT_TEST_APPROVAL_PIPE",
+                format!(r"\\.\pipe\gitcontext-test-none-{}", uuid::Uuid::new_v4()),
+            );
+            command.env_remove("GITCONTEXT_TEST_APPROVAL_SERVER_EXE");
         }
         let mut child = command
             .env("GITCONTEXT_DATA_DIR", data_dir)

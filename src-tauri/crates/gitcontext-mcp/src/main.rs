@@ -790,7 +790,13 @@ impl GitContextServer {
                 None
             };
             let gui_result = match gui_result {
-                Some(result) => result.ok().and_then(Result::ok),
+                Some(Ok(Ok(result))) => Some(result),
+                Some(Ok(Err(reason))) => {
+                    // Shown in the client's MCP log; explains why GitContext's window was not used.
+                    eprintln!("GitContext confirmation window unavailable: {reason}");
+                    None
+                }
+                Some(Err(_)) => None,
                 None => None,
             };
             let method = if gui_result.is_some() {

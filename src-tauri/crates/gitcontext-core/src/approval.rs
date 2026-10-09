@@ -68,16 +68,22 @@ pub fn expected_gui_path(mcp_exe: &Path) -> PathBuf {
             .ancestors()
             .find(|p| p.join("Cargo.toml").exists() && p.join("crates").exists())
             .unwrap_or(parent)
-            .join("target/debug/git-context.exe")
+            .join("target")
+            .join("debug")
+            .join("git-context.exe")
     } else {
         parent.join("git-context.exe")
     }
 }
 
 pub fn image_matches(actual: &Path, expected: &Path) -> bool {
-    actual
-        .to_string_lossy()
-        .eq_ignore_ascii_case(&expected.to_string_lossy())
+    // Compare component by component so "/" and "\\" and letter case do not matter.
+    let normalize = |path: &Path| {
+        path.components()
+            .map(|part| part.as_os_str().to_string_lossy().to_lowercase())
+            .collect::<Vec<_>>()
+    };
+    normalize(actual) == normalize(expected)
 }
 
 #[cfg(windows)]
@@ -455,6 +461,11 @@ mod tests {
         assert!(!image_matches(
             Path::new(r"C:\Other\git-context.exe"),
             Path::new(r"c:\app\git-context.exe")
+        ));
+        // The development path is built with joins; mixed separators must still match.
+        assert!(image_matches(
+            Path::new(r"C:\Work\src-tauri\target\debug\git-context.exe"),
+            Path::new("C:\\Work\\src-tauri\\target/debug/git-context.exe")
         ));
     }
     #[cfg(debug_assertions)]
