@@ -172,6 +172,7 @@ pub fn run() {
             commands::apply_ai_client,
             commands::verify_ai_client,
             commands::bootstrap,
+            commands::load_state,
             commands::set_locale,
             commands::set_close_to_tray,
             commands::set_gui_confirmation,

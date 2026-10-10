@@ -21,6 +21,12 @@ use std::{
     sync::{atomic::AtomicBool, Arc},
 };
 
+/// Reads the shared state again, e.g. after the MCP server changed it.
+pub fn load_state(store: &StateStore) -> Result<AppData, String> {
+    let _guard = store.lock()?;
+    store.load()
+}
+
 pub fn bootstrap(store: &StateStore) -> Result<BootstrapResult, String> {
     let _guard = store.lock()?;
     let data = store.load()?;

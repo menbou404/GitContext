@@ -6,6 +6,7 @@ import {
   addNewRepositoryFolder,
   applyAssignment,
   bootstrap,
+  loadState,
   chooseCloneDestinationDirectory,
   chooseRepositoryDirectory,
   cloneGithubRepository,
@@ -424,6 +425,12 @@ function App({ previewLocale }: { previewLocale?: Locale }) {
     if (!data) return;
     const onReturn = () => {
       if (document.visibilityState !== "visible") return;
+      // Repositories the AI registered through MCP appear without restarting the app.
+      // Replacing data also refreshes statuses through the effect above.
+      loadState()
+        .then((next) => setResult((current) =>
+          current && JSON.stringify(current.data) !== JSON.stringify(next) ? { ...current, data: next } : current))
+        .catch((error) => console.error("Could not reload GitContext state", error));
       const { at, running } = statusRefresh.current;
       if (shouldRefreshOnFocus(at, Date.now(), running)) refreshStatuses();
     };
