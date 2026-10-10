@@ -23,6 +23,48 @@ pub struct Profile {
 pub struct ProfileAutoApprove {
     #[serde(default)]
     pub clone_repository: bool,
+    #[serde(default)]
+    pub new_repository_folders: Vec<String>,
+    #[serde(default)]
+    pub new_repository: NewRepositoryDefaults,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewRepositoryDefaults {
+    #[serde(default)]
+    pub push_work_branch: bool,
+    #[serde(default)]
+    pub push_default_branch: bool,
+    #[serde(default)]
+    pub create_pull_request: bool,
+    #[serde(default)]
+    pub merge_pull_request: bool,
+    #[serde(default)]
+    pub publish_repository: bool,
+    #[serde(default)]
+    pub publish_visibility: PublishVisibility,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PublishVisibility {
+    #[default]
+    Private,
+    Any,
+}
+
+impl From<&NewRepositoryDefaults> for AutoApprove {
+    fn from(value: &NewRepositoryDefaults) -> Self {
+        Self {
+            push_work_branch: value.push_work_branch,
+            push_default_branch: value.push_default_branch,
+            create_pull_request: value.create_pull_request,
+            merge_pull_request: value.merge_pull_request,
+            publish_repository: value.publish_repository,
+            publish_visibility: value.publish_visibility,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -38,6 +80,15 @@ pub struct AutoApprove {
     pub merge_pull_request: bool,
     #[serde(default)]
     pub publish_repository: bool,
+    #[serde(default)]
+    pub publish_visibility: PublishVisibility,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoApproveSource {
+    pub profile_id: String,
+    pub applied_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -56,6 +107,8 @@ pub struct RepositoryRecord {
     pub last_applied_at: Option<String>,
     #[serde(default)]
     pub auto_approve: AutoApprove,
+    #[serde(default)]
+    pub auto_approve_source: Option<AutoApproveSource>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -189,6 +242,11 @@ mod auto_approve_tests {
         assert!(!data.repositories[0].auto_approve.push_default_branch);
         assert!(!data.repositories[0].auto_approve.merge_pull_request);
         assert!(!data.repositories[0].auto_approve.publish_repository);
+        assert_eq!(
+            data.repositories[0].auto_approve.publish_visibility,
+            PublishVisibility::Private
+        );
+        assert!(data.repositories[0].auto_approve_source.is_none());
         let partial = r#"{"version":2,"profiles":[],"repositories":[{"id":"r","name":"r","path":"r","autoApprove":{"pushWorkBranch":true}}]}"#;
         let data: AppData = serde_json::from_str(partial).unwrap();
         assert!(data.repositories[0].auto_approve.push_work_branch);
@@ -199,6 +257,23 @@ mod auto_approve_tests {
         let old_profile = r##"{"version":2,"profiles":[{"id":"p","label":"P","accent":"#112233","gitName":"Test","gitEmail":"test@example.com"}],"repositories":[]}"##;
         let profiles: AppData = serde_json::from_str(old_profile).unwrap();
         assert!(!profiles.profiles[0].auto_approve.clone_repository);
+        assert!(profiles.profiles[0]
+            .auto_approve
+            .new_repository_folders
+            .is_empty());
+        assert!(
+            !profiles.profiles[0]
+                .auto_approve
+                .new_repository
+                .push_work_branch
+        );
+        assert_eq!(
+            profiles.profiles[0]
+                .auto_approve
+                .new_repository
+                .publish_visibility,
+            PublishVisibility::Private
+        );
         let saved = serde_json::to_value(data).unwrap();
         assert_eq!(
             saved["repositories"][0]["autoApprove"]["pushWorkBranch"],

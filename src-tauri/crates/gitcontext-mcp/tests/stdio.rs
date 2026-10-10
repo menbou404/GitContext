@@ -237,7 +237,7 @@ fn local_fixture(fixture: &Fixture) -> (PathBuf, PathBuf) {
             }],
             "repositories": [{
                 "id": "repo-1", "name": "fictional-repo", "path": repo,
-                "remoteUrl": null, "branch": "main", "profileId": null,
+                "remoteUrl": null, "branch": "main", "profileId": "fictional",
                 "lastAppliedAt": null
             }]
         })
@@ -461,6 +461,8 @@ fn local_preview_execution_and_audit() {
         "preview_assignment",
         json!({"repositoryId": "repo-1", "profileId": "fictional"}),
     );
+    assert_eq!(preview["structuredContent"]["decision"], "existing");
+    assert_eq!(preview["structuredContent"]["inheritDefaults"], false);
     let id = preview["structuredContent"]["previewId"].as_str().unwrap();
     assert_eq!(uuid_version(id), Some('4'));
     let applied = rpc.call(4, "apply_profile", json!({"previewId": id}));
@@ -575,6 +577,13 @@ fn set_repository_approval(data_dir: &Path, field: &str, enabled: bool) {
     fs::write(path, state.to_string()).unwrap();
 }
 
+fn set_repository_visibility(data_dir: &Path, visibility: &str) {
+    let path = data_dir.join("state.json");
+    let mut state: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    state["repositories"][0]["autoApprove"]["publishVisibility"] = json!(visibility);
+    fs::write(path, state.to_string()).unwrap();
+}
+
 fn set_profile_clone_approval(data_dir: &Path, enabled: bool) {
     let path = data_dir.join("state.json");
     let mut state: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
@@ -672,6 +681,133 @@ fn auto_push_work_branch_skips_confirmation_even_without_elicitation() {
         .unwrap()
         .contains("Test stopped before"));
     assert_eq!(last_audit(&data_dir)["confirmation"], "auto");
+}
+
+#[test]
+fn folder_rule_assigns_new_repository_and_inherits_push_approval() {
+    let fixture = Fixture::new();
+    let (repo, data_dir) = push_fixture(&fixture);
+    git(&repo, &["switch", "-c", "work"]);
+    install_gh_stub(&fixture, &data_dir, Some("main"));
+    let path = data_dir.join("state.json");
+    let mut state: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    state["repositories"] = json!([]);
+    state["profiles"][0]["autoApprove"] = json!({"newRepositoryFolders":[fs::canonicalize(&fixture.root).unwrap()],
+        "newRepository":{"pushWorkBranch":true,"publishVisibility":"private"}});
+    fs::write(&path, state.to_string()).unwrap();
+    let mut rpc = Rpc::start_tier(&data_dir, "remote");
+    initialize(&mut rpc);
+    let added = rpc.call(2, "add_repository", json!({"path":repo}));
+    let id = added["structuredContent"]["repository"]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let suggested = rpc.call(3, "suggest_profile", json!({"repositoryId":id}));
+    assert_eq!(
+        suggested["structuredContent"]["ruleProfile"]["id"],
+        "fictional"
+    );
+    assert_eq!(suggested["structuredContent"]["needsConfirmation"], false);
+    let preview = rpc.call(4, "preview_assignment", json!({"repositoryId":id}));
+    assert_eq!(preview["structuredContent"]["decision"], "automatic");
+    assert_eq!(preview["structuredContent"]["inheritDefaults"], true);
+    let preview_id = preview["structuredContent"]["previewId"].as_str().unwrap();
+    let applied = rpc.call(5, "apply_profile", json!({"previewId":preview_id}));
+    assert_eq!(applied["isError"], false, "{applied}");
+    let saved: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(
+        saved["repositories"][0]["autoApprove"]["pushWorkBranch"],
+        true
+    );
+    assert_eq!(
+        saved["repositories"][0]["autoApproveSource"]["profileId"],
+        "fictional"
+    );
+    assert_eq!(
+        last_audit(&data_dir)["summary"],
+        "Profile applied; auto-approval defaults inherited"
+    );
+    let push_preview = rpc.call(6, "preview_push", json!({"repositoryId":id}));
+    let push_id = push_preview["structuredContent"]["previewId"]
+        .as_str()
+        .unwrap();
+    let pushed = rpc.modern_call(7, "push", json!({"previewId":push_id}), json!({}));
+    assert!(
+        pushed["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("Test stopped before"),
+        "{pushed}"
+    );
+    assert_eq!(last_audit(&data_dir)["confirmation"], "auto");
+}
+
+#[test]
+fn new_repository_without_matching_rule_or_with_different_profile_is_rejected() {
+    for case in ["outside", "different", "ambiguous"] {
+        let fixture = Fixture::new();
+        let (repo, data_dir) = local_fixture(&fixture);
+        let path = data_dir.join("state.json");
+        let mut state: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        state["repositories"][0]["profileId"] = Value::Null;
+        state["repositories"][0]["path"] = json!(fs::canonicalize(&repo).unwrap());
+        if case != "outside" {
+            state["profiles"][0]["autoApprove"] =
+                json!({"newRepositoryFolders":[fs::canonicalize(&fixture.root).unwrap()]});
+            let mut other = state["profiles"][0].clone();
+            other["id"] = json!("other");
+            if case == "different" {
+                other["autoApprove"] = json!({});
+            }
+            state["profiles"].as_array_mut().unwrap().push(other);
+        }
+        fs::write(&path, state.to_string()).unwrap();
+        let mut rpc = Rpc::start_tier(&data_dir, "local");
+        initialize(&mut rpc);
+        let preview = rpc.call(2, "preview_assignment", json!({"repositoryId":"repo-1","profileId":if case == "different" { "other" } else { "fictional" }}));
+        assert_eq!(
+            preview["structuredContent"]["decision"],
+            "needsConfirmation"
+        );
+        let id = preview["structuredContent"]["previewId"].as_str().unwrap();
+        let result = rpc.call(3, "apply_profile", json!({"previewId":id}));
+        assert_eq!(result["isError"], true, "{result}");
+        assert!(result["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("Ask the user which Profile"));
+        assert_eq!(last_audit(&data_dir)["outcome"], "rejected");
+        let saved: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert!(saved["repositories"][0]["profileId"].is_null());
+        let _ = repo;
+    }
+}
+
+#[test]
+fn assignment_preview_rejects_changed_defaults() {
+    let fixture = Fixture::new();
+    let (repo, data_dir) = local_fixture(&fixture);
+    let path = data_dir.join("state.json");
+    let mut state: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    state["repositories"][0]["profileId"] = Value::Null;
+    state["repositories"][0]["path"] = json!(fs::canonicalize(&repo).unwrap());
+    state["profiles"][0]["autoApprove"] =
+        json!({"newRepositoryFolders":[fs::canonicalize(&fixture.root).unwrap()]});
+    fs::write(&path, state.to_string()).unwrap();
+    let mut rpc = Rpc::start_tier(&data_dir, "local");
+    initialize(&mut rpc);
+    let preview = rpc.call(2, "preview_assignment", json!({"repositoryId":"repo-1"}));
+    assert_eq!(preview["structuredContent"]["decision"], "automatic");
+    let id = preview["structuredContent"]["previewId"].as_str().unwrap();
+    state["profiles"][0]["autoApprove"]["newRepository"]["pushWorkBranch"] = json!(true);
+    fs::write(&path, state.to_string()).unwrap();
+    let rejected = rpc.call(3, "apply_profile", json!({"previewId":id}));
+    assert_eq!(rejected["isError"], true);
+    assert!(rejected["content"][0]["text"]
+        .as_str()
+        .unwrap()
+        .contains("changed after the preview"));
+    assert_eq!(last_audit(&data_dir)["outcome"], "rejected");
 }
 
 #[test]
@@ -822,7 +958,12 @@ fn merge_approval_is_independent_of_other_repository_settings() {
 
 #[test]
 fn publish_approval_uses_registered_repository_setting() {
-    for approved in [false, true] {
+    for (approved, publish_visibility, visibility) in [
+        (false, "private", "private"),
+        (true, "private", "private"),
+        (true, "private", "public"),
+        (true, "any", "public"),
+    ] {
         let fixture = Fixture::new();
         let (repo, data_dir) = local_fixture(&fixture);
         git(&repo, &["config", "user.name", "Sample Person"]);
@@ -832,6 +973,7 @@ fn publish_approval_uses_registered_repository_setting() {
         git(&repo, &["commit", "-m", "Initial fixture"]);
         install_gh_stub(&fixture, &data_dir, Some("main"));
         set_repository_approval(&data_dir, "publishRepository", approved);
+        set_repository_visibility(&data_dir, publish_visibility);
         let mut rpc = Rpc::start_tier(&data_dir, "remote");
         initialize(&mut rpc);
         let assignment = rpc.call(
@@ -849,11 +991,12 @@ fn publish_approval_uses_registered_repository_setting() {
         let preview = rpc.call(
             4,
             "preview_publish",
-            json!({"repositoryId":"repo-1","name":"published-repo","visibility":"private"}),
+            json!({"repositoryId":"repo-1","name":"published-repo","visibility":visibility}),
         );
         assert_eq!(preview["isError"], false, "{preview}");
         let id = preview["structuredContent"]["previewId"].as_str().unwrap();
-        let capabilities = if approved {
+        let expected_auto = approved && (visibility == "private" || publish_visibility == "any");
+        let capabilities = if expected_auto {
             json!({})
         } else {
             json!({"elicitation":{"form":{}}})
@@ -864,7 +1007,7 @@ fn publish_approval_uses_registered_repository_setting() {
             json!({"previewId":id}),
             capabilities,
         );
-        assert_remote_approval(&result, approved, &data_dir);
+        assert_remote_approval(&result, expected_auto, &data_dir);
     }
 }
 
@@ -977,6 +1120,9 @@ fn remote_tier_exposes_only_remote_operations() {
             .collect();
         assert!(!names.contains(&"set_repository_auto_approve"));
         assert!(!names.contains(&"set_profile_auto_approve"));
+        assert!(!names.contains(&"set_new_repository_defaults"));
+        assert!(!names.contains(&"add_new_repository_folder"));
+        assert!(!names.contains(&"remove_new_repository_folder"));
         for name in [
             "preview_merge",
             "preview_clone",

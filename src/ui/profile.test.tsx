@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { GhProfileStatus, Profile, RepositoryRecord } from "../types";
-import { profileCopy } from "../i18n";
+import { profileCopy, uiCopy } from "../i18n";
+import { ProfileEditor } from "./ProfileEditor";
+import { RepositoryOverview } from "./RepositoryOverview";
 import { ProfileList } from "./ProfileList";
 import { FirstRunGuide } from "./FirstRunGuide";
 import { connectionFor, firstRunSteps } from "./profileStatus";
@@ -18,6 +20,25 @@ const connected: GhProfileStatus = { available: true, authenticated: true, usern
 const different: GhProfileStatus = { available: true, authenticated: true, username: "other-account" };
 
 describe("profiles", () => {
+  it("shows new repository defaults and source in both languages", () => {
+    const configured = { ...profile, autoApprove: { cloneRepository: false, newRepositoryFolders: ["C:\\example\\projects"],
+      newRepository: { pushWorkBranch: true, pushDefaultBranch: false, createPullRequest: false,
+        mergePullRequest: false, publishRepository: true, publishVisibility: "private" as const } } };
+    for (const locale of ["ja", "en"] as const) {
+      const editor = renderToStaticMarkup(<ProfileEditor initial={configured} creating={false} ghAvailable={false} locale={locale}
+        onClose={() => {}} onSave={async () => {}} onAutoApprove={async () => {}} />);
+      expect(editor).toContain(uiCopy[locale].newRepositoryDefaults);
+      expect(editor).toContain(uiCopy[locale].publishPrivateOnly);
+      expect(editor).toContain("C:\\example\\projects");
+      const overview = renderToStaticMarkup(<RepositoryOverview repository={{ ...repository,
+        autoApproveSource: { profileId: profile.id, appliedAt: "2026-10-10T00:00:00Z" } }} profiles={[profile]} profile={profile}
+        status={undefined} pendingProfileId={profile.id} preview={null} locale={locale} busy={false} removing={false}
+        onPendingProfile={() => {}} onReview={() => {}} onCancelReview={() => {}} onApply={async () => {}}
+        onAutoApprove={() => {}} onStartRemove={() => {}} onCancelRemove={() => {}} onRemove={() => {}} />);
+      expect(overview).toContain(uiCopy[locale].publishAny);
+      expect(overview).toContain("Sample");
+    }
+  });
   it("distinguishes connected, disconnected, and different accounts", () => {
     expect(connectionFor(profile, connected)).toBe("connected");
     expect(connectionFor(profile, { available: true, authenticated: false })).toBe("disconnected");

@@ -185,6 +185,7 @@ mod tests {
                 profile_id: None,
                 last_applied_at: None,
                 auto_approve: AutoApprove::default(),
+                auto_approve_source: None,
             },
             profile,
             changes: vec![

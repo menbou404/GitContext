@@ -1,5 +1,5 @@
 use chrono::{DateTime, Duration, Utc};
-use gitcontext_core::{git_ops::ExactChange, models::ConfigChange};
+use gitcontext_core::{git_ops::ExactChange, models::ConfigChange, operations::AssignmentDecision};
 use std::{
     collections::HashMap,
     sync::Mutex,
@@ -28,6 +28,9 @@ pub enum Fingerprint {
     Apply {
         head: String,
         changes: Vec<(String, Option<String>, Option<String>)>,
+        decision: AssignmentDecision,
+        inherit_defaults: bool,
+        defaults: Option<String>,
     },
     Commit {
         branch: String,
@@ -83,13 +86,25 @@ pub enum Fingerprint {
 }
 
 impl Fingerprint {
-    pub fn assignment(head: String, changes: &[ConfigChange]) -> Self {
+    pub fn assignment(
+        head: String,
+        changes: &[ConfigChange],
+        decision: AssignmentDecision,
+        inherit_defaults: bool,
+        defaults: Option<String>,
+    ) -> Self {
         let mut changes: Vec<_> = changes
             .iter()
             .map(|c| (c.key.clone(), c.current_value.clone(), c.next_value.clone()))
             .collect();
         changes.sort();
-        Self::Apply { head, changes }
+        Self::Apply {
+            head,
+            changes,
+            decision,
+            inherit_defaults,
+            defaults,
+        }
     }
 
     pub fn commit(branch: String, head: String, mut changes: Vec<ExactChange>) -> Self {

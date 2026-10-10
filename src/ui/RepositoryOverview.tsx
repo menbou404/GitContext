@@ -18,7 +18,7 @@ export function RepositoryOverview({ repository, profiles, profile, status, pend
   onReview: () => void;
   onCancelReview: () => void;
   onApply: () => Promise<void>;
-  onAutoApprove: (field: keyof AutoApprove, enabled: boolean) => void;
+  onAutoApprove: (field: keyof AutoApprove, enabled: boolean | "private" | "any") => void;
   onStartRemove: () => void;
   onCancelRemove: () => void;
   onRemove: () => void;
@@ -73,6 +73,11 @@ export function RepositoryOverview({ repository, profiles, profile, status, pend
       <label><input type="checkbox" checked={repository.autoApprove.createPullRequest} onChange={(event) => onAutoApprove("createPullRequest", event.target.checked)} />{old.autoApprovePullRequest}</label>
       <label><input type="checkbox" checked={repository.autoApprove.mergePullRequest} onChange={(event) => onAutoApprove("mergePullRequest", event.target.checked)} />{old.autoApproveMerge}<span className="ui-risk">{old.autoApproveMergeRisk}</span></label>
       <label><input type="checkbox" checked={repository.autoApprove.publishRepository} onChange={(event) => onAutoApprove("publishRepository", event.target.checked)} />{old.autoApprovePublish}<span className="ui-risk">{old.autoApprovePublishRisk}</span></label>
+      <div className="ui-visibility-options"><span>{old.publishVisibility}</span>
+        <label><input type="radio" name="repository-publish-visibility" checked={(repository.autoApprove.publishVisibility ?? "private") === "private"} onChange={() => onAutoApprove("publishVisibility", "private")} />{old.publishPrivateOnly}</label>
+        <label><input type="radio" name="repository-publish-visibility" checked={repository.autoApprove.publishVisibility === "any"} onChange={() => onAutoApprove("publishVisibility", "any")} />{old.publishAny}<span className="ui-risk">{old.autoApprovePublishRisk}</span></label>
+      </div>
+      {repository.autoApproveSource && <p className="ui-muted">{old.defaultsSource(profiles.find((item) => item.id === repository.autoApproveSource?.profileId)?.label ?? repository.autoApproveSource.profileId, new Date(repository.autoApproveSource.appliedAt).toLocaleString(locale))}</p>}
     </fieldset>
 
     <section className="ui-remove">
