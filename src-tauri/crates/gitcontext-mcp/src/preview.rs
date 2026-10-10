@@ -1,4 +1,5 @@
 use chrono::{DateTime, Duration, Utc};
+use gitcontext_core::approval::AssignmentRequest;
 use gitcontext_core::{git_ops::ExactChange, models::ConfigChange, operations::AssignmentDecision};
 use std::{
     collections::HashMap,
@@ -124,6 +125,7 @@ pub struct Entry {
     pub operation: Operation,
     pub repository_id: String,
     pub profile_id: String,
+    pub requested_profile: bool,
     pub fingerprint: Fingerprint,
     pub created_at: DateTime<Utc>,
     pub used: bool,
@@ -137,6 +139,7 @@ pub struct PendingConfirmation {
     pub preview_id: String,
     pub tool: &'static str,
     pub prompt: String,
+    pub assignment: Option<AssignmentRequest>,
     created_at: Instant,
     pub responded_after: StdDuration,
 }
@@ -164,10 +167,26 @@ impl PendingConfirmations {
                 preview_id,
                 tool,
                 prompt,
+                assignment: None,
                 created_at: now,
                 responded_after: StdDuration::ZERO,
             },
         );
+        id
+    }
+
+    pub fn issue_assignment(
+        &self,
+        entry: Entry,
+        preview_id: String,
+        prompt: String,
+        assignment: AssignmentRequest,
+        timeout: StdDuration,
+    ) -> String {
+        let id = self.issue(entry, preview_id, "apply_profile", prompt, timeout);
+        if let Some(pending) = self.0.lock().unwrap().get_mut(&id) {
+            pending.assignment = Some(assignment);
+        }
         id
     }
 
@@ -203,6 +222,17 @@ impl Previews {
         profile_id: String,
         fingerprint: Fingerprint,
     ) -> String {
+        self.issue_with_requested(operation, repository_id, profile_id, fingerprint, true)
+    }
+
+    pub fn issue_with_requested(
+        &self,
+        operation: Operation,
+        repository_id: String,
+        profile_id: String,
+        fingerprint: Fingerprint,
+        requested_profile: bool,
+    ) -> String {
         let id = Uuid::new_v4().to_string();
         let now = Utc::now();
         let mut entries = self.0.lock().unwrap();
@@ -216,6 +246,7 @@ impl Previews {
                 operation,
                 repository_id,
                 profile_id,
+                requested_profile,
                 fingerprint,
                 created_at: now,
                 used: false,

@@ -14,13 +14,43 @@ pub struct ApprovalRequest {
     pub message: String,
     pub client: Option<String>,
     pub expires_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assignment: Option<AssignmentRequest>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AssignmentRequest {
+    pub repository_name: String,
+    pub repository_path: String,
+    pub profiles: Vec<AssignmentProfile>,
+    pub profile_id: Option<String>,
+    pub apply_defaults: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AssignmentProfile {
+    pub id: String,
+    pub label: String,
+    pub apply_defaults: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ApprovalResponse {
-    id: String,
-    approved: bool,
+pub struct ApprovalResponse {
+    pub id: String,
+    pub approved: bool,
+    #[serde(default, rename = "profileId", skip_serializing_if = "Option::is_none")]
+    pub profile_id: Option<String>,
+    #[serde(
+        default,
+        rename = "applyDefaults",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub apply_defaults: Option<bool>,
 }
 
 impl ApprovalRequest {
@@ -32,7 +62,15 @@ impl ApprovalRequest {
             message,
             client,
             expires_at: expiry.to_rfc3339(),
+            kind: None,
+            assignment: None,
         }
+    }
+
+    pub fn assignment(mut self, details: AssignmentRequest) -> Self {
+        self.kind = Some("assignment".into());
+        self.assignment = Some(details);
+        self
     }
 
     fn valid(&self) -> bool {
@@ -40,6 +78,7 @@ impl ApprovalRequest {
             && !self.tool.is_empty()
             && !self.message.is_empty()
             && DateTime::parse_from_rfc3339(&self.expires_at).is_ok()
+            && (self.kind.as_deref() != Some("assignment") || self.assignment.is_some())
     }
 
     pub fn remaining(&self) -> Duration {
@@ -56,9 +95,16 @@ fn parse_request(line: &[u8]) -> Option<ApprovalRequest> {
     request.valid().then_some(request)
 }
 
-fn parse_response(line: &[u8], id: &str) -> bool {
+fn parse_response(line: &[u8], id: &str) -> ApprovalResponse {
     serde_json::from_slice::<ApprovalResponse>(line)
-        .is_ok_and(|response| response.id == id && response.approved)
+        .ok()
+        .filter(|response| response.id == id)
+        .unwrap_or_else(|| ApprovalResponse {
+            id: id.into(),
+            approved: false,
+            profile_id: None,
+            apply_defaults: None,
+        })
 }
 
 pub fn expected_gui_path(mcp_exe: &Path) -> PathBuf {
@@ -296,9 +342,9 @@ mod windows {
         Err("Approval response timed out or exceeded the limit.".into())
     }
 
-    pub fn start_server(
+    pub fn start_server_with_selection(
         name: String,
-        callback: impl Fn(ApprovalRequest) -> bool + Send + Sync + 'static,
+        callback: impl Fn(ApprovalRequest) -> ApprovalResponse + Send + Sync + 'static,
     ) -> Result<(), String> {
         let first = create_pipe(&name, true)?;
         let first_raw = first.0 as usize;
@@ -315,11 +361,15 @@ mod windows {
                         if let Ok(line) = read_line(pipe.0, Instant::now() + Duration::from_secs(5))
                         {
                             if let Some(request) = parse_request(&line) {
-                                let approved =
-                                    !request.remaining().is_zero() && callback(request.clone());
-                                let response = ApprovalResponse {
-                                    id: request.id,
-                                    approved,
+                                let response = if request.remaining().is_zero() {
+                                    ApprovalResponse {
+                                        id: request.id.clone(),
+                                        approved: false,
+                                        profile_id: None,
+                                        apply_defaults: None,
+                                    }
+                                } else {
+                                    callback(request.clone())
                                 };
                                 if let Ok(mut bytes) = serde_json::to_vec(&response) {
                                     bytes.push(b'\n');
@@ -374,12 +424,12 @@ mod windows {
         )))
     }
 
-    pub fn request(
+    pub fn request_selection(
         name: &str,
         expected: &Path,
         approval: &ApprovalRequest,
         timeout: Duration,
-    ) -> Result<bool, String> {
+    ) -> Result<ApprovalResponse, String> {
         let name_wide = wide(name);
         let deadline = Instant::now() + timeout;
         let handle = loop {
@@ -410,32 +460,70 @@ mod windows {
         let mut bytes = serde_json::to_vec(approval).map_err(|e| e.to_string())?;
         bytes.push(b'\n');
         if write_line(handle.0, &bytes).is_err() {
-            return Ok(false);
+            return Ok(ApprovalResponse {
+                id: approval.id.clone(),
+                approved: false,
+                profile_id: None,
+                apply_defaults: None,
+            });
         }
         let response = match read_line(handle.0, deadline) {
             Ok(response) => response,
-            Err(_) => return Ok(false),
+            Err(_) => {
+                return Ok(ApprovalResponse {
+                    id: approval.id.clone(),
+                    approved: false,
+                    profile_id: None,
+                    apply_defaults: None,
+                })
+            }
         };
         Ok(parse_response(&response, &approval.id))
     }
 }
 
 #[cfg(windows)]
-pub use windows::{pipe_name, request, start_server};
+pub use windows::{pipe_name, request_selection, start_server_with_selection};
+
+pub fn start_server(
+    name: String,
+    callback: impl Fn(ApprovalRequest) -> bool + Send + Sync + 'static,
+) -> Result<(), String> {
+    start_server_with_selection(name, move |request| ApprovalResponse {
+        id: request.id.clone(),
+        approved: callback(request),
+        profile_id: None,
+        apply_defaults: None,
+    })
+}
+
+pub fn request(
+    name: &str,
+    expected: &Path,
+    approval: &ApprovalRequest,
+    timeout: Duration,
+) -> Result<bool, String> {
+    request_selection(name, expected, approval, timeout).map(|response| response.approved)
+}
 
 #[cfg(not(windows))]
 pub fn pipe_name() -> Result<String, String> {
     Err("GUI confirmation is unavailable on this platform.".into())
 }
 #[cfg(not(windows))]
-pub fn start_server(
+pub fn start_server_with_selection(
     _: String,
-    _: impl Fn(ApprovalRequest) -> bool + Send + Sync + 'static,
+    _: impl Fn(ApprovalRequest) -> ApprovalResponse + Send + Sync + 'static,
 ) -> Result<(), String> {
     Err("GUI confirmation is unavailable on this platform.".into())
 }
 #[cfg(not(windows))]
-pub fn request(_: &str, _: &Path, _: &ApprovalRequest, _: Duration) -> Result<bool, String> {
+pub fn request_selection(
+    _: &str,
+    _: &Path,
+    _: &ApprovalRequest,
+    _: Duration,
+) -> Result<ApprovalResponse, String> {
     Err("GUI confirmation is unavailable on this platform.".into())
 }
 
@@ -447,10 +535,48 @@ mod tests {
         let request = ApprovalRequest::new("push", "Confirm".into(), None, Duration::from_secs(2));
         assert!(parse_request(&serde_json::to_vec(&request).unwrap()).is_some());
         assert!(parse_request(b"{broken").is_none());
-        assert!(!parse_response(
-            br#"{"id":"wrong","approved":true}"#,
-            &request.id
-        ));
+        assert!(!parse_response(br#"{"id":"wrong","approved":true}"#, &request.id).approved);
+    }
+    #[test]
+    fn assignment_messages_keep_remote_wire_compatibility() {
+        let remote = ApprovalRequest::new("push", "Confirm".into(), None, Duration::from_secs(2));
+        let old_request: serde_json::Value = serde_json::from_str(&format!(
+            r#"{{"id":"{}","tool":"push","message":"Confirm","client":null,"expiresAt":"{}"}}"#,
+            remote.id, remote.expires_at
+        ))
+        .unwrap();
+        assert!(parse_request(&serde_json::to_vec(&old_request).unwrap()).is_some());
+        assert!(serde_json::to_value(&remote).unwrap().get("kind").is_none());
+        assert!(
+            parse_response(
+                format!(r#"{{"id":"{}","approved":true}}"#, remote.id).as_bytes(),
+                &remote.id
+            )
+            .approved
+        );
+        let assignment = remote.assignment(AssignmentRequest {
+            repository_name: "sample".into(),
+            repository_path: r"C:\sample".into(),
+            profiles: vec![AssignmentProfile {
+                id: "one".into(),
+                label: "One (@example)".into(),
+                apply_defaults: true,
+            }],
+            profile_id: Some("one".into()),
+            apply_defaults: true,
+        });
+        let parsed = parse_request(&serde_json::to_vec(&assignment).unwrap()).unwrap();
+        assert_eq!(parsed.kind.as_deref(), Some("assignment"));
+        let response = parse_response(
+            format!(
+                r#"{{"id":"{}","approved":true,"profileId":"one","applyDefaults":false}}"#,
+                assignment.id
+            )
+            .as_bytes(),
+            &assignment.id,
+        );
+        assert_eq!(response.profile_id.as_deref(), Some("one"));
+        assert_eq!(response.apply_defaults, Some(false));
     }
     #[test]
     fn image_comparison_ignores_case() {
@@ -495,9 +621,8 @@ mod tests {
         let wrong = exe.with_file_name("not-gitcontext.exe");
         let request_one =
             ApprovalRequest::new("push", "Check".into(), None, Duration::from_secs(3));
-        assert!(request(&pipe, &wrong, &request_one, Duration::from_secs(3))
-            .unwrap_err()
-            .contains("image did not match"));
+        let error = request(&pipe, &wrong, &request_one, Duration::from_secs(3)).unwrap_err();
+        assert!(error.contains("image did not match"), "{error}");
         let request_two =
             ApprovalRequest::new("push", "Check".into(), None, Duration::from_secs(3));
         assert!(request(&pipe, &exe, &request_two, Duration::from_secs(3)).unwrap());

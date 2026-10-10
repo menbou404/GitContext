@@ -116,6 +116,194 @@ struct Approval {
 }
 rmcp::elicit_safe!(Approval);
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AssignmentApproval {
+    approved: bool,
+    profile_id: Option<String>,
+    apply_defaults: Option<bool>,
+}
+
+fn assignment_schema(details: &approval::AssignmentRequest) -> Result<ElicitationSchema, String> {
+    let mut schema = json!({
+        "type": "object",
+        "properties": {
+            "profileId": {"type":"string", "enum": details.profiles.iter().map(|p| p.id.clone()).collect::<Vec<_>>(),
+                "enumNames": details.profiles.iter().map(|p| p.label.clone()).collect::<Vec<_>>()},
+            "applyDefaults": {"type":"boolean", "default":details.apply_defaults},
+            "approved": {"type":"boolean", "default":false}
+        },
+        "required": ["approved"]
+    });
+    if let Some(id) = &details.profile_id {
+        schema["properties"]["profileId"]["default"] = json!(id);
+    }
+    serde_json::from_value(schema).map_err(|_| "Confirmation failed.".into())
+}
+
+fn assignment_details(
+    store: &StateStore,
+    entry: &preview::Entry,
+) -> Result<approval::AssignmentRequest, String> {
+    let data = load(store)?;
+    let repository = repository(&data, &entry.repository_id)?;
+    let mut current = repository.clone();
+    current.remote_url = git_ops::origin_url(&repository.path).ok();
+    let initial = operations::assignment_initial_profile(
+        &current,
+        &data.profiles,
+        entry.requested_profile.then_some(entry.profile_id.as_str()),
+    );
+    let profiles = data
+        .profiles
+        .iter()
+        .map(|profile| approval::AssignmentProfile {
+            id: profile.id.clone(),
+            label: profile.github_username.as_deref().map_or_else(
+                || profile.label.clone(),
+                |user| format!("{} (@{user})", profile.label),
+            ),
+            apply_defaults: operations::assignment_default_for_profile(&current, profile),
+        })
+        .collect::<Vec<_>>();
+    let apply_defaults = initial
+        .as_ref()
+        .and_then(|id| profiles.iter().find(|profile| &profile.id == id))
+        .is_some_and(|profile| profile.apply_defaults);
+    Ok(approval::AssignmentRequest {
+        repository_name: repository.name.clone(),
+        repository_path: repository.path.clone(),
+        profiles,
+        profile_id: initial,
+        apply_defaults,
+    })
+}
+
+fn parse_assignment_response(response: ElicitResult) -> Result<AssignmentApproval, String> {
+    match response.action {
+        ElicitationAction::Accept => {
+            serde_json::from_value(response.content.ok_or("Confirmation declined.")?)
+                .map_err(|_| "Confirmation failed.".into())
+        }
+        ElicitationAction::Decline => Err("Confirmation declined.".into()),
+        ElicitationAction::Cancel => Err("Confirmation cancelled.".into()),
+        _ => Err("Confirmation failed.".into()),
+    }
+}
+
+fn checked_assignment(
+    value: AssignmentApproval,
+    details: &approval::AssignmentRequest,
+    elapsed: Duration,
+) -> Result<(String, bool), String> {
+    if elapsed < MIN_HUMAN_RESPONSE {
+        return Err(if value.approved {
+            AUTOMATIC_APPROVAL
+        } else {
+            AUTOMATIC_DECLINE
+        }
+        .into());
+    }
+    if !value.approved {
+        return Err("Confirmation declined.".into());
+    }
+    let id = value.profile_id.ok_or("Select a Profile.")?;
+    if !details.profiles.iter().any(|profile| profile.id == id) {
+        return Err("The selected Profile is invalid.".into());
+    }
+    Ok((id, value.apply_defaults.unwrap_or(details.apply_defaults)))
+}
+
+fn checked_assignment_result(
+    result: Result<AssignmentApproval, String>,
+    details: &approval::AssignmentRequest,
+    elapsed: Duration,
+) -> Result<(String, bool), String> {
+    if elapsed < MIN_HUMAN_RESPONSE {
+        return match result {
+            Ok(value) if value.approved => Err(AUTOMATIC_APPROVAL.into()),
+            Err(error) if error == "Confirmation timed out." => Err(error),
+            _ => Err(AUTOMATIC_DECLINE.into()),
+        };
+    }
+    result.and_then(|value| checked_assignment(value, details, elapsed))
+}
+
+fn apply_assignment(
+    store: &StateStore,
+    entry: preview::Entry,
+    selected: String,
+    defaults: bool,
+) -> Result<(Value, String), String> {
+    if fingerprint_again(store, &entry).map_err(|_| CHANGED.to_string())? != entry.fingerprint {
+        return Err(CHANGED.into());
+    }
+    let data = load(store)?;
+    if !data.profiles.iter().any(|profile| profile.id == selected) {
+        return Err("The selected Profile is invalid.".into());
+    }
+    let selected_preview =
+        operations::preview_assignment(store, entry.repository_id.clone(), selected.clone())?;
+    let mut selected_entry = entry.clone();
+    selected_entry.profile_id = selected.clone();
+    let record = repository(&data, &entry.repository_id)?;
+    let mut current = record.clone();
+    current.remote_url = git_ops::origin_url(&record.path).ok();
+    let choice = operations::assignment_choice(&current, &data.profiles, Some(&selected));
+    selected_entry.fingerprint = Fingerprint::assignment(
+        git_ops::head_commit(&record.path)?,
+        &selected_preview.changes,
+        choice.decision,
+        choice.inherit_defaults,
+        choice.inherit_defaults.then(|| {
+            serde_json::to_string(&selected_preview.profile.auto_approve.new_repository).unwrap()
+        }),
+    );
+    if fingerprint_again(store, &selected_entry).map_err(|_| CHANGED.to_string())?
+        != selected_entry.fingerprint
+    {
+        return Err(CHANGED.into());
+    }
+    let data = if defaults {
+        if matches!(
+            entry.fingerprint,
+            Fingerprint::Apply {
+                decision: operations::AssignmentDecision::Automatic,
+                ..
+            }
+        ) {
+            operations::apply_profile_with_defaults(
+                store,
+                entry.repository_id.clone(),
+                selected.clone(),
+            )?
+        } else {
+            operations::apply_profile_with_confirmed_defaults(
+                store,
+                entry.repository_id.clone(),
+                selected.clone(),
+            )?
+        }
+    } else {
+        operations::apply_profile(store, entry.repository_id.clone(), selected.clone())?
+    };
+    let record = repository(&data, &entry.repository_id)?;
+    let keys = selected_preview
+        .changes
+        .iter()
+        .map(|change| change.key.clone())
+        .collect::<Vec<_>>();
+    let summary = if defaults {
+        "Profile applied; auto-approval defaults inherited"
+    } else {
+        "Profile applied; auto-approval defaults not inherited"
+    };
+    Ok((
+        json!({"repositoryId":record.id,"profileId":selected,"appliedKeys":keys,"applyDefaults":defaults}),
+        summary.into(),
+    ))
+}
+
 #[derive(Default)]
 struct AuditIds {
     repository_id: Option<String>,
@@ -1434,11 +1622,12 @@ impl GitContextServer {
                     choice.inherit_defaults,
                     choice.inherit_defaults.then(|| serde_json::to_string(&preview.profile.auto_approve.new_repository).unwrap()),
                 );
-                result["previewId"] = json!(previews.issue(
+                result["previewId"] = json!(previews.issue_with_requested(
                     Operation::Apply,
                     preview.repository.id.clone(),
                     preview.profile.id.clone(),
-                    fingerprint
+                    fingerprint,
+                    input.profile_id.is_some(),
                 ));
             }
             Ok(result)
@@ -1800,26 +1989,291 @@ impl GitContextServer {
         &self,
         Parameters(input): Parameters<PreviewIdInput>,
         context: rmcp::service::RequestContext<rmcp::RoleServer>,
-    ) -> CallToolResult {
-        self.local_action("apply_profile", context, move |store, previews, ids| {
-            let entry = consume_verified(previews, store, &input.preview_id, Operation::Apply, ids)?;
-            let keys = match &entry.fingerprint { Fingerprint::Apply { changes, .. } => changes.iter().map(|c| c.0.clone()).collect::<Vec<_>>(), _ => unreachable!() };
-            let (decision, inherit_defaults) = match &entry.fingerprint { Fingerprint::Apply { decision, inherit_defaults, .. } => (*decision, *inherit_defaults), _ => unreachable!() };
-            if decision == operations::AssignmentDecision::NeedsConfirmation {
-                ids.rejected = true;
-                let data = load(store)?;
-                let record = repository(&data, &entry.repository_id)?;
-                let mut current_record = record.clone();
-                current_record.remote_url = git_ops::origin_url(&record.path).ok();
-                let choice = operations::assignment_choice(&current_record, &data.profiles, Some(&entry.profile_id));
-                return Err(format!("{} Ask the user which Profile to use, or assign it in GitContext.", choice.reason));
+        InputResponses(responses): InputResponses,
+        RequestState(state): RequestState,
+    ) -> CallToolResponse {
+        let client = request_client(&context);
+        let client_name = client.as_ref().map(|info| info.name.as_str());
+        let modern = context
+            .protocol_version()
+            .is_some_and(|v| v >= ProtocolVersion::V_2026_07_28);
+        let retry = responses.is_some() || state.is_some();
+        let (entry, details, response, elapsed) = if retry {
+            let pending = match state
+                .ok_or_else(|| "Confirmation request state is missing.".to_string())
+                .and_then(|state| {
+                    self.pending_confirmations.take(
+                        &state,
+                        "apply_profile",
+                        self.confirmation_timeout,
+                    )
+                }) {
+                Ok(pending) => pending,
+                Err(error) => {
+                    return self
+                        .remote_result(
+                            "apply_profile",
+                            &AuditIds::default(),
+                            client_name,
+                            Some("elicitation"),
+                            Err(error),
+                            true,
+                        )
+                        .await
+                        .into()
+                }
+            };
+            let ids = AuditIds {
+                repository_id: Some(pending.entry.repository_id.clone()),
+                profile_id: Some(pending.entry.profile_id.clone()),
+                rejected: true,
+            };
+            if !modern
+                || pending.preview_id != input.preview_id
+                || responses.is_none()
+                || pending.assignment.is_none()
+            {
+                return self
+                    .remote_result(
+                        "apply_profile",
+                        &ids,
+                        client_name,
+                        Some("elicitation"),
+                        Err("Confirmation retry is invalid.".into()),
+                        true,
+                    )
+                    .await
+                    .into();
             }
-            let data = if inherit_defaults { operations::apply_profile_with_defaults(store, entry.repository_id.clone(), entry.profile_id.clone())? }
-                else { operations::apply_profile(store, entry.repository_id.clone(), entry.profile_id.clone())? };
-            let record = repository(&data, &entry.repository_id)?;
-            let summary = if inherit_defaults { "Profile applied; auto-approval defaults inherited".into() } else { format!("Applied keys: {}", keys.join(", ")) };
-            Ok((json!({"repositoryId": record.id, "profileId": entry.profile_id, "appliedKeys": keys}), summary))
-        }).await
+            (
+                pending.entry,
+                pending.assignment.unwrap(),
+                responses,
+                pending.responded_after,
+            )
+        } else {
+            let mut ids = AuditIds::default();
+            let entry = match consume_verified(
+                &self.previews,
+                &self.store,
+                &input.preview_id,
+                Operation::Apply,
+                &mut ids,
+            ) {
+                Ok(entry) => entry,
+                Err(error) => {
+                    return self
+                        .remote_result("apply_profile", &ids, client_name, None, Err(error), true)
+                        .await
+                        .into()
+                }
+            };
+            let details = match assignment_details(&self.store, &entry) {
+                Ok(details) => details,
+                Err(error) => {
+                    return self
+                        .remote_result("apply_profile", &ids, client_name, None, Err(error), false)
+                        .await
+                        .into()
+                }
+            };
+            (entry, details, None, Duration::ZERO)
+        };
+        let mut ids = AuditIds {
+            repository_id: Some(entry.repository_id.clone()),
+            profile_id: Some(entry.profile_id.clone()),
+            rejected: false,
+        };
+        let (selected, defaults, confirmation) = if matches!(
+            entry.fingerprint,
+            Fingerprint::Apply {
+                decision: operations::AssignmentDecision::NeedsConfirmation,
+                ..
+            }
+        ) {
+            let supports = client.as_ref().is_some_and(|info| info.elicitation);
+            let unreliable = self.desktop_code_tab
+                || client.as_ref().is_some_and(|info| {
+                    unreliable_client(&info.name, UNRELIABLE_ELICITATION_CLIENTS)
+                });
+            if retry && (!supports || unreliable) {
+                return self
+                    .remote_result(
+                        "apply_profile",
+                        &ids,
+                        client_name,
+                        Some("elicitation"),
+                        Err("Confirmation retry is invalid.".into()),
+                        true,
+                    )
+                    .await
+                    .into();
+            }
+            let prompt = format!("Confirm Profile assignment for {} at {}. Select a Profile and whether to apply its auto-approval defaults.", details.repository_name, details.repository_path);
+            let answer = if let Some(responses) = response {
+                let parsed = responses
+                    .get("approval")
+                    .cloned()
+                    .ok_or_else(|| "Confirmation declined.".to_string())
+                    .and_then(|value| {
+                        serde_json::from_value::<ElicitResult>(value)
+                            .map_err(|_| "Confirmation failed.".to_string())
+                    })
+                    .and_then(parse_assignment_response);
+                checked_assignment_result(parsed, &details, elapsed)
+            } else if supports && !unreliable {
+                let schema = match assignment_schema(&details) {
+                    Ok(schema) => schema,
+                    Err(error) => {
+                        return self
+                            .remote_result(
+                                "apply_profile",
+                                &ids,
+                                client_name,
+                                Some("elicitation"),
+                                Err(error),
+                                true,
+                            )
+                            .await
+                            .into()
+                    }
+                };
+                if modern {
+                    let state = self.pending_confirmations.issue_assignment(
+                        entry,
+                        input.preview_id,
+                        prompt.clone(),
+                        details,
+                        self.confirmation_timeout,
+                    );
+                    let mut requests = BTreeMap::new();
+                    requests.insert(
+                        "approval".into(),
+                        InputRequest::Elicitation(ElicitRequest::new(
+                            ElicitRequestParams::FormElicitationParams {
+                                meta: None,
+                                message: prompt,
+                                requested_schema: schema,
+                            },
+                        )),
+                    );
+                    return InputRequiredResult::new(Some(requests), Some(state)).into();
+                }
+                let started = Instant::now();
+                let reply = context
+                    .peer
+                    .create_elicitation_with_timeout(
+                        ElicitRequestParams::FormElicitationParams {
+                            meta: None,
+                            message: prompt,
+                            requested_schema: schema,
+                        },
+                        Some(self.confirmation_timeout),
+                    )
+                    .await;
+                let elapsed = started.elapsed();
+                let parsed = reply
+                    .map_err(|error| match error {
+                        rmcp::service::ServiceError::Timeout { .. } => {
+                            "Confirmation timed out.".to_string()
+                        }
+                        _ => "Confirmation failed.".to_string(),
+                    })
+                    .and_then(parse_assignment_response);
+                checked_assignment_result(parsed, &details, elapsed)
+            } else {
+                let timeout = self.confirmation_timeout;
+                let details_for_gui = details.clone();
+                let client = client_name.map(str::to_owned);
+                let gui = tokio::task::spawn_blocking(move || {
+                    let started = Instant::now();
+                    let pipe = if cfg!(debug_assertions) {
+                        std::env::var("GITCONTEXT_TEST_APPROVAL_PIPE")
+                            .or_else(|_| approval::pipe_name())
+                    } else {
+                        approval::pipe_name()
+                    }?;
+                    let executable = std::env::current_exe().map_err(|e| e.to_string())?;
+                    let expected = if cfg!(debug_assertions) {
+                        std::env::var_os("GITCONTEXT_TEST_APPROVAL_SERVER_EXE")
+                            .map(std::path::PathBuf::from)
+                            .unwrap_or_else(|| approval::expected_gui_path(&executable))
+                    } else {
+                        approval::expected_gui_path(&executable)
+                    };
+                    let request =
+                        approval::ApprovalRequest::new("apply_profile", prompt, client, timeout)
+                            .assignment(details_for_gui);
+                    let response =
+                        approval::request_selection(&pipe, &expected, &request, timeout)?;
+                    Ok::<_, String>((response, started.elapsed()))
+                })
+                .await;
+                match gui {
+                    Ok(Ok((value, elapsed))) => checked_assignment(
+                        AssignmentApproval {
+                            approved: value.approved,
+                            profile_id: value.profile_id,
+                            apply_defaults: value.apply_defaults,
+                        },
+                        &details,
+                        elapsed,
+                    ),
+                    other => {
+                        eprintln!("GitContext assignment window unavailable: {other:?}");
+                        return self.remote_result("apply_profile", &ids, client_name, None,
+                            Err("This client cannot show GitContext's confirmation prompt. Start GitContext and try again. Ask the user which Profile to use, or assign it in GitContext.".into()), true).await.into();
+                    }
+                }
+            };
+            let confirmation = if supports && !unreliable {
+                "elicitation"
+            } else {
+                "gui"
+            };
+            match answer {
+                Ok((selected, defaults)) => (selected, defaults, Some(confirmation)),
+                Err(error) => {
+                    return self
+                        .remote_result(
+                            "apply_profile",
+                            &ids,
+                            client_name,
+                            Some(confirmation),
+                            Err(error),
+                            true,
+                        )
+                        .await
+                        .into()
+                }
+            }
+        } else {
+            let defaults = matches!(
+                entry.fingerprint,
+                Fingerprint::Apply {
+                    inherit_defaults: true,
+                    ..
+                }
+            );
+            (entry.profile_id.clone(), defaults, None)
+        };
+        ids.profile_id = Some(selected.clone());
+        let result = tokio::task::spawn_blocking({
+            let store = self.store.clone();
+            move || apply_assignment(&store, entry, selected, defaults)
+        })
+        .await
+        .unwrap_or_else(|_| Err("GitContext operation failed.".into()));
+        self.remote_result(
+            "apply_profile",
+            &ids,
+            client_name,
+            confirmation,
+            result,
+            false,
+        )
+        .await
+        .into()
     }
 
     #[tool(

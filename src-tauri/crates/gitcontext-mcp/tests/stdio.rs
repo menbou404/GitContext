@@ -783,6 +783,282 @@ fn new_repository_without_matching_rule_or_with_different_profile_is_rejected() 
     }
 }
 
+fn confirmation_assignment_fixture(fixture: &Fixture, case: &str) -> (PathBuf, String, String) {
+    let (repo, data_dir) = local_fixture(fixture);
+    let path = data_dir.join("state.json");
+    let mut state: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    state["repositories"][0]["profileId"] = Value::Null;
+    state["repositories"][0]["path"] = json!(fs::canonicalize(&repo).unwrap());
+    let mut other = state["profiles"][0].clone();
+    other["id"] = json!("other");
+    other["label"] = json!("Other");
+    other["gitName"] = json!("Other Example");
+    other["gitEmail"] = json!("other@example.com");
+    if case == "ambiguous" || case == "different" {
+        state["profiles"][0]["autoApprove"] = json!({"newRepositoryFolders":[fs::canonicalize(&fixture.root).unwrap()], "newRepository":{"pushWorkBranch":true}});
+        if case == "ambiguous" {
+            other["autoApprove"] = state["profiles"][0]["autoApprove"].clone();
+        }
+    }
+    state["profiles"].as_array_mut().unwrap().push(other);
+    fs::write(&path, state.to_string()).unwrap();
+    let requested = if case == "different" {
+        "other"
+    } else {
+        "fictional"
+    };
+    let selected = if case == "different" {
+        "fictional"
+    } else {
+        "other"
+    };
+    (data_dir, requested.into(), selected.into())
+}
+
+#[test]
+fn assignment_mrtr_confirmations_cover_choices_and_rejections() {
+    let capabilities = json!({"elicitation":{"form":{}}});
+    for case in ["outside", "ambiguous", "different"] {
+        for variant in [
+            "defaults",
+            "without_defaults",
+            "decline",
+            "quick",
+            "invalid",
+        ] {
+            let fixture = Fixture::new();
+            let (data_dir, requested, selected) = confirmation_assignment_fixture(&fixture, case);
+            let mut rpc = Rpc::start_with(&data_dir, "local", true, None);
+            let preview = rpc.modern_call(
+                1,
+                "preview_assignment",
+                json!({"repositoryId":"repo-1","profileId":requested}),
+                capabilities.clone(),
+            );
+            assert_eq!(
+                preview["structuredContent"]["decision"], "needsConfirmation",
+                "{case}: {preview}"
+            );
+            let id = preview["structuredContent"]["previewId"].as_str().unwrap();
+            let first = rpc.modern_call(
+                2,
+                "apply_profile",
+                json!({"previewId":id}),
+                capabilities.clone(),
+            );
+            assert_eq!(first["resultType"], "input_required", "{case}: {first}");
+            let schema = &first["inputRequests"]["approval"]["params"]["requestedSchema"];
+            assert_eq!(
+                schema["properties"]["profileId"]["enum"],
+                json!(["fictional", "other"])
+            );
+            assert_eq!(
+                schema["properties"]["profileId"]["enumNames"],
+                json!(["Fictional", "Other"])
+            );
+            assert_eq!(schema["properties"]["profileId"]["default"], requested);
+            assert_eq!(schema["properties"]["applyDefaults"]["type"], "boolean");
+            assert_eq!(schema["required"], json!(["approved"]));
+            let state = first["requestState"].as_str().unwrap();
+            if variant != "quick" {
+                std::thread::sleep(Duration::from_millis(1050));
+            }
+            let response = match variant {
+                "decline" => json!({"action":"decline"}),
+                "invalid" => {
+                    json!({"action":"accept","content":{"approved":true,"profileId":"missing","applyDefaults":true}})
+                }
+                _ => {
+                    json!({"action":"accept","content":{"approved":true,"profileId":selected,"applyDefaults":variant == "defaults"}})
+                }
+            };
+            let result = rpc.modern_request(3, "tools/call", json!({"name":"apply_profile","arguments":{"previewId":id},"requestState":state,"inputResponses":{"approval":response}}), capabilities.clone());
+            let success = variant == "defaults" || variant == "without_defaults";
+            assert_eq!(result["isError"], !success, "{case}/{variant}: {result}");
+            let saved: Value =
+                serde_json::from_str(&fs::read_to_string(data_dir.join("state.json")).unwrap())
+                    .unwrap();
+            if success {
+                assert_eq!(saved["repositories"][0]["profileId"], selected);
+                assert_eq!(
+                    saved["repositories"][0]["autoApproveSource"].is_object(),
+                    variant == "defaults"
+                );
+                assert_eq!(
+                    result["structuredContent"]["applyDefaults"],
+                    variant == "defaults"
+                );
+                assert_eq!(
+                    last_audit(&data_dir)["summary"],
+                    if variant == "defaults" {
+                        "Profile applied; auto-approval defaults inherited"
+                    } else {
+                        "Profile applied; auto-approval defaults not inherited"
+                    }
+                );
+            } else {
+                assert!(saved["repositories"][0]["profileId"].is_null());
+            }
+            assert_eq!(last_audit(&data_dir)["confirmation"], "elicitation");
+            if variant == "quick" {
+                assert_eq!(
+                    last_audit(&data_dir)["summary"],
+                    "Remote operation rejected: client answered without showing the prompt"
+                );
+            }
+            if case == "outside" && variant == "defaults" {
+                let reused = rpc.modern_request(4, "tools/call", json!({"name":"apply_profile","arguments":{"previewId":id},"requestState":state,"inputResponses":{"approval":{"action":"accept","content":{"approved":true,"profileId":selected,"applyDefaults":true}}}}), capabilities.clone());
+                assert_eq!(reused["isError"], true);
+            }
+        }
+    }
+}
+
+#[test]
+fn assignment_legacy_elicitation_selects_profile_and_declines() {
+    for case in ["outside", "ambiguous", "different"] {
+        for variant in [
+            "defaults",
+            "without_defaults",
+            "decline",
+            "quick",
+            "invalid",
+        ] {
+            let fixture = Fixture::new();
+            let (data_dir, requested, selected) = confirmation_assignment_fixture(&fixture, case);
+            let mut rpc = Rpc::start_tier(&data_dir, "local");
+            initialize_with_capabilities(&mut rpc, json!({"elicitation":{"form":{}}}));
+            let preview = rpc.call(
+                2,
+                "preview_assignment",
+                json!({"repositoryId":"repo-1","profileId":requested}),
+            );
+            let id = preview["structuredContent"]["previewId"].as_str().unwrap();
+            rpc.send(json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"apply_profile","arguments":{"previewId":id}}}));
+            let request = rpc.read_message();
+            assert_eq!(request["method"], "elicitation/create", "{request}");
+            assert_eq!(
+                request["params"]["requestedSchema"]["properties"]["profileId"]["enum"],
+                json!(["fictional", "other"])
+            );
+            if variant != "quick" {
+                std::thread::sleep(Duration::from_millis(1050));
+            }
+            let answer = match variant {
+                "decline" => json!({"action":"decline"}),
+                "invalid" => {
+                    json!({"action":"accept","content":{"approved":true,"profileId":"missing","applyDefaults":true}})
+                }
+                _ => {
+                    json!({"action":"accept","content":{"approved":true,"profileId":selected,"applyDefaults":variant == "defaults"}})
+                }
+            };
+            rpc.send(json!({"jsonrpc":"2.0","id":request["id"],"result":answer}));
+            let result = rpc.read_message();
+            assert_eq!(result["id"], 3);
+            let approved = variant == "defaults" || variant == "without_defaults";
+            assert_eq!(
+                result["result"]["isError"], !approved,
+                "{case}/{variant}: {result}"
+            );
+            let saved: Value =
+                serde_json::from_str(&fs::read_to_string(data_dir.join("state.json")).unwrap())
+                    .unwrap();
+            if approved {
+                assert_eq!(saved["repositories"][0]["profileId"], selected);
+                assert_eq!(
+                    saved["repositories"][0]["autoApproveSource"].is_object(),
+                    variant == "defaults"
+                );
+            } else {
+                assert!(saved["repositories"][0]["profileId"].is_null());
+            }
+            assert_eq!(last_audit(&data_dir)["confirmation"], "elicitation");
+            if variant == "quick" {
+                assert_eq!(
+                    last_audit(&data_dir)["summary"],
+                    "Remote operation rejected: client answered without showing the prompt"
+                );
+            }
+        }
+    }
+}
+
+#[cfg(all(windows, debug_assertions))]
+#[test]
+fn assignment_gui_pipe_returns_selected_profile() {
+    for case in ["outside", "ambiguous", "different"] {
+        for (approved, defaults) in [(true, true), (true, false), (false, false)] {
+            let fixture = Fixture::new();
+            let (data_dir, requested, selected) = confirmation_assignment_fixture(&fixture, case);
+            let pipe = format!(
+                r"\\.\pipe\gitcontext-assignment-test-{}",
+                uuid::Uuid::new_v4()
+            );
+            let chosen = selected.clone();
+            approval::start_server_with_selection(pipe.clone(), move |request| {
+                assert_eq!(request.kind.as_deref(), Some("assignment"));
+                assert_eq!(request.assignment.as_ref().unwrap().profiles.len(), 2);
+                std::thread::sleep(Duration::from_millis(1100));
+                approval::ApprovalResponse {
+                    id: request.id,
+                    approved,
+                    profile_id: Some(chosen.clone()),
+                    apply_defaults: Some(defaults),
+                }
+            })
+            .unwrap();
+            let executable = std::env::current_exe().unwrap();
+            let mut rpc = Rpc::start_with_desktop_and_gui(
+                &data_dir,
+                "local",
+                false,
+                None,
+                false,
+                Some((&pipe, &executable)),
+            );
+            initialize(&mut rpc);
+            let preview = rpc.call(
+                2,
+                "preview_assignment",
+                json!({"repositoryId":"repo-1","profileId":requested}),
+            );
+            let id = preview["structuredContent"]["previewId"].as_str().unwrap();
+            let result = rpc.call(3, "apply_profile", json!({"previewId":id}));
+            assert_eq!(result["isError"], !approved, "{result}");
+            assert_eq!(last_audit(&data_dir)["confirmation"], "gui");
+        }
+    }
+}
+
+#[test]
+fn assignment_without_confirmation_stays_unapplied_even_with_trust() {
+    for case in ["outside", "ambiguous", "different"] {
+        for trust in [false, true] {
+            let fixture = Fixture::new();
+            let (data_dir, requested, _) = confirmation_assignment_fixture(&fixture, case);
+            let mut rpc = Rpc::start_with(&data_dir, "local", trust, None);
+            initialize(&mut rpc);
+            let preview = rpc.call(
+                2,
+                "preview_assignment",
+                json!({"repositoryId":"repo-1","profileId":requested}),
+            );
+            let id = preview["structuredContent"]["previewId"].as_str().unwrap();
+            let result = rpc.call(3, "apply_profile", json!({"previewId":id}));
+            assert_eq!(result["isError"], true, "{case}/{trust}: {result}");
+            assert!(result["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("Ask the user which Profile"));
+            let saved: Value =
+                serde_json::from_str(&fs::read_to_string(data_dir.join("state.json")).unwrap())
+                    .unwrap();
+            assert!(saved["repositories"][0]["profileId"].is_null());
+        }
+    }
+}
+
 #[test]
 fn assignment_preview_rejects_changed_defaults() {
     let fixture = Fixture::new();

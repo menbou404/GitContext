@@ -132,8 +132,8 @@ GitContextの確認ウィンドウ（[BACKGROUND_DESIGN.md](BACKGROUND_DESIGN.md
 | 段階 | 内容 |
 |---|---|
 | A-1（実装済み） | プロファイルの既定値とフォルダ、リポジトリの`publishVisibility`と`autoApproveSource`、フォルダの規則、`suggest_profile`と`preview_assignment`の拡張、`automatic`の場合の既定値の引き継ぎ、GUIの設定画面。`needsConfirmation`では適用を拒否して理由と案内を返す |
-| A-2 | `needsConfirmation`の場合の人の確認（elicitationのプロファイル選択、GitContextの確認ウィンドウ） |
+| A-2（実装済み） | `needsConfirmation`の場合の人の確認（レガシーelicitationとMRTRのプロファイル選択、GitContextの確認ウィンドウ）。選択したプロファイルで適用直前に再照合し、既定値の適用を選べる。確認手段がなければ適用しない |
 
 各段階を1つのPRとする。A-1の時点では、`needsConfirmation`の場合は適用せず、理由と案内を返す。
 
-A-1では、規則でプロファイルが決まらず`profileId`も省略されたプレビューは、`needsConfirmation`と理由を返すが、適用可能なプレビューIDは発行しない。プロファイルを明示したプレビューではIDを発行するが、A-2まで適用時に拒否する。
+A-1から引き継ぐ制約として、規則でプロファイルが決まらず`profileId`も省略されたプレビューは、`needsConfirmation`と理由を返すが、適用可能なプレビューIDは発行しない。人の確認へ進むにはプロファイルを明示して再プレビューする。A-2では確認フォーム内で別のプロファイルも選べる。

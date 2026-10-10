@@ -1,8 +1,8 @@
 export type Locale = "en" | "ja";
 
 export const approvalCopy = {
-  en: { title: "Confirm GitContext operation", client: "AI client", unknownClient: "Unknown", operation: "Operation", remaining: "Time remaining", seconds: "seconds", reject: "Reject", approve: "Approve", waiting: "Waiting for a request" },
-  ja: { title: "GitContextの操作を確認", client: "AIクライアント", unknownClient: "不明", operation: "操作", remaining: "残り時間", seconds: "秒", reject: "拒否", approve: "承認", waiting: "確認の依頼を待っています" },
+  en: { title: "Confirm GitContext operation", assignmentTitle: "Assign a Profile", repository: "Repository", profile: "Profile", chooseProfile: "Choose a Profile", applyDefaults: "Also apply this Profile's auto-approval defaults", client: "AI client", unknownClient: "Unknown", operation: "Operation", remaining: "Time remaining", seconds: "seconds", reject: "Reject", approve: "Approve", waiting: "Waiting for a request" },
+  ja: { title: "GitContextの操作を確認", assignmentTitle: "プロファイルの割り当て", repository: "リポジトリ", profile: "プロファイル", chooseProfile: "プロファイルを選択", applyDefaults: "このプロファイルの自動承認の既定値も適用する", client: "AIクライアント", unknownClient: "不明", operation: "操作", remaining: "残り時間", seconds: "秒", reject: "拒否", approve: "承認", waiting: "確認の依頼を待っています" },
 } as const;
 
 export const aiCopy = {
