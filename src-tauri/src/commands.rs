@@ -58,6 +58,11 @@ pub fn bootstrap(store: State<'_, StateStore>) -> Result<BootstrapResult, String
 }
 
 #[tauri::command]
+pub fn load_state(store: State<'_, StateStore>) -> Result<AppData, String> {
+    operations::load_state(&store)
+}
+
+#[tauri::command]
 pub fn set_locale(
     app: AppHandle,
     store: State<'_, StateStore>,

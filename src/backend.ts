@@ -114,6 +114,12 @@ const demoLocaleKey = "gitcontext.locale";
 const nextDemoId = (prefix: string) =>
   `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 
+/** Reads the shared state again; the MCP server may have changed it while the window was away. */
+export async function loadState(): Promise<AppData> {
+  if (!inDesktopApp()) return structuredClone(demoState);
+  return invoke<AppData>("load_state");
+}
+
 export async function bootstrap(): Promise<BootstrapResult> {
   if (!inDesktopApp()) {
     try {
