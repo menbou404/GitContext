@@ -141,8 +141,10 @@ pub fn answer_approval(
     state: State<'_, crate::approval::ApprovalState>,
     id: String,
     approved: bool,
+    profile_id: Option<String>,
+    apply_defaults: Option<bool>,
 ) -> Result<(), String> {
-    state.answer(&id, approved)?;
+    state.answer(&id, approved, profile_id, apply_defaults)?;
     if let Some(window) = app.get_webview_window("approval") {
         let _ = window.hide();
     }

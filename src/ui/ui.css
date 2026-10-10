@@ -106,6 +106,8 @@ html, body, #root { min-width: 1050px; }
 .ui-approval-card p { margin: 0; }
 .ui-approval-message { flex: 1; overflow-wrap: anywhere; white-space: pre-wrap; }
 .ui-approval-card .ui-confirm-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.ui-assignment-defaults { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; }
+.ui-assignment-defaults input { accent-color: var(--ui-ink); margin: 3px 0 0; }
 .ui-card h2, .ui-card legend { margin: 0 0 14px; font-size: 15px; font-weight: 700; }
 .ui-profile-selection { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; margin-bottom: 14px; }
 .ui-profile-selection label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }

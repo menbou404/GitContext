@@ -352,6 +352,34 @@ pub fn origin_profile_candidates(
         .unwrap_or_default()
 }
 
+/// Initial selection for a human assignment confirmation.
+pub fn assignment_initial_profile(
+    repository: &RepositoryRecord,
+    profiles: &[Profile],
+    requested: Option<&str>,
+) -> Option<String> {
+    requested
+        .filter(|id| profiles.iter().any(|profile| profile.id == *id))
+        .map(str::to_owned)
+        .or_else(|| {
+            origin_profile_candidates(repository, profiles)
+                .into_iter()
+                .next()
+        })
+        .or_else(|| match folder_rule(&repository.path, profiles) {
+            FolderRule::Profile(id) => Some(id),
+            _ => None,
+        })
+}
+
+pub fn assignment_default_for_profile(repository: &RepositoryRecord, profile: &Profile) -> bool {
+    profile
+        .auto_approve
+        .new_repository_folders
+        .iter()
+        .any(|folder| path_within(&repository.path, folder))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum AssignmentDecision {
@@ -705,13 +733,31 @@ pub fn apply_profile_with_defaults(
     repository_id: String,
     profile_id: String,
 ) -> Result<AppData, String> {
+    apply_profile_with_defaults_inner(store, repository_id, profile_id, false)
+}
+
+/// Use only after a human has confirmed the assignment and its defaults.
+pub fn apply_profile_with_confirmed_defaults(
+    store: &StateStore,
+    repository_id: String,
+    profile_id: String,
+) -> Result<AppData, String> {
+    apply_profile_with_defaults_inner(store, repository_id, profile_id, true)
+}
+
+fn apply_profile_with_defaults_inner(
+    store: &StateStore,
+    repository_id: String,
+    profile_id: String,
+    confirmed: bool,
+) -> Result<AppData, String> {
     let _guard = store.lock()?;
     let mut data = store.load()?;
     let (repository, profile) = find_assignment(&data, &repository_id, &profile_id)?;
     let mut current_repository = repository.clone();
     current_repository.remote_url = git_ops::origin_url(&repository.path).ok();
     let choice = assignment_choice(&current_repository, &data.profiles, Some(&profile_id));
-    if choice.decision != AssignmentDecision::Automatic {
+    if !confirmed && choice.decision != AssignmentDecision::Automatic {
         return Err(format!(
             "{} Ask the user which Profile to use, or assign it in GitContext.",
             choice.reason
@@ -1442,6 +1488,37 @@ mod new_repository_tests {
             profile("b", &[r"\\?\C:\work\"], None),
         ];
         assert_eq!(folder_rule(r"C:\Work\repo", &tied), FolderRule::Ambiguous);
+    }
+
+    #[test]
+    fn assignment_confirmation_initial_values_follow_requested_origin_then_rule() {
+        let profiles = vec![
+            profile("rule", &[r"C:\Work"], None),
+            profile("origin", &[r"C:\Other"], Some("sample-owner")),
+            profile("chosen", &[r"C:\Work"], None),
+        ];
+        let mut repo = repository(r"C:\Work\repo");
+        assert_eq!(assignment_initial_profile(&repo, &profiles, None), None); // tied rule
+        repo.remote_url = Some("git@github.com:sample-owner/repo.git".into());
+        assert_eq!(
+            assignment_initial_profile(&repo, &profiles, None).as_deref(),
+            Some("origin")
+        );
+        assert_eq!(
+            assignment_initial_profile(&repo, &profiles, Some("chosen")).as_deref(),
+            Some("chosen")
+        );
+        assert!(assignment_default_for_profile(&repo, &profiles[2]));
+        assert!(!assignment_default_for_profile(&repo, &profiles[1]));
+        assert_eq!(
+            assignment_initial_profile(&repo, &profiles, Some("missing")).as_deref(),
+            Some("origin")
+        );
+        repo.remote_url = None;
+        assert_eq!(
+            assignment_initial_profile(&repo, &profiles[..1], None).as_deref(),
+            Some("rule")
+        );
     }
 
     #[test]

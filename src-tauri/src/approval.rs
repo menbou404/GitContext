@@ -1,4 +1,4 @@
-use gitcontext_core::approval::{self, ApprovalRequest};
+use gitcontext_core::approval::{self, ApprovalRequest, ApprovalResponse};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     mpsc::{self, SyncSender},
@@ -10,7 +10,7 @@ use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 struct Pending {
     request: ApprovalRequest,
     displayed: Option<Instant>,
-    respond: SyncSender<bool>,
+    respond: SyncSender<ApprovalResponse>,
 }
 
 pub struct ApprovalState {
@@ -43,11 +43,22 @@ impl ApprovalState {
 
     pub fn decline(&self) {
         if let Some(pending) = self.pending.lock().ok().and_then(|mut p| p.take()) {
-            let _ = pending.respond.send(false);
+            let _ = pending.respond.send(ApprovalResponse {
+                id: pending.request.id,
+                approved: false,
+                profile_id: None,
+                apply_defaults: None,
+            });
         }
     }
 
-    pub fn answer(&self, id: &str, approved: bool) -> Result<(), String> {
+    pub fn answer(
+        &self,
+        id: &str,
+        approved: bool,
+        profile_id: Option<String>,
+        apply_defaults: Option<bool>,
+    ) -> Result<(), String> {
         let mut guard = self.pending.lock().map_err(|e| e.to_string())?;
         let pending = guard.as_ref().ok_or("No approval is pending")?;
         if pending.request.id != id {
@@ -61,7 +72,12 @@ impl ApprovalState {
             return Err("Approval is too early or has expired".into());
         }
         if let Some(pending) = guard.take() {
-            let _ = pending.respond.send(approved);
+            let _ = pending.respond.send(ApprovalResponse {
+                id: id.into(),
+                approved,
+                profile_id,
+                apply_defaults,
+            });
         }
         Ok(())
     }
@@ -89,10 +105,15 @@ pub fn start(app: &tauri::AppHandle) -> Result<(), String> {
         }
     };
     let app = app.clone();
-    let result = approval::start_server(name, move |request| {
+    let result = approval::start_server_with_selection(name, move |request| {
         let state = app.state::<ApprovalState>();
         if !state.enabled.load(Ordering::SeqCst) {
-            return false;
+            return ApprovalResponse {
+                id: request.id,
+                approved: false,
+                profile_id: None,
+                apply_defaults: None,
+            };
         }
         let (sender, receiver) = mpsc::sync_channel(1);
         if let Ok(mut pending) = state.pending.lock() {
@@ -102,7 +123,12 @@ pub fn start(app: &tauri::AppHandle) -> Result<(), String> {
                 respond: sender,
             });
         } else {
-            return false;
+            return ApprovalResponse {
+                id: request.id,
+                approved: false,
+                profile_id: None,
+                apply_defaults: None,
+            };
         }
         let app_for_window = app.clone();
         let _ = app.run_on_main_thread(move || {
@@ -126,7 +152,14 @@ pub fn start(app: &tauri::AppHandle) -> Result<(), String> {
             }
         });
         let remaining = request.remaining().min(Duration::from_secs(120));
-        let approved = receiver.recv_timeout(remaining).unwrap_or(false);
+        let response = receiver
+            .recv_timeout(remaining)
+            .unwrap_or(ApprovalResponse {
+                id: request.id,
+                approved: false,
+                profile_id: None,
+                apply_defaults: None,
+            });
         state.decline();
         let app_for_hide = app.clone();
         let _ = app.run_on_main_thread(move || {
@@ -134,7 +167,7 @@ pub fn start(app: &tauri::AppHandle) -> Result<(), String> {
                 let _ = window.hide();
             }
         });
-        approved
+        response
     });
     if let Err(error) = result {
         state.started.store(false, Ordering::SeqCst);
