@@ -86,8 +86,15 @@ export function AiIntegrationPage({ locale }: { locale: Locale }) {
                   : info.state === "not_found" ? null : <button className="ui-button" type="button" onClick={() => void start(info, info.state === "repair" ? "repair" : "connect")} disabled={!inventory.server.built}>{copy.actions[info.state === "repair" ? "repair" : "connect"]}</button>}
               </div>
             </div>
+            {open && <div className="ui-ai-editor">
+              {plan && <ConfirmPanel locale={locale} rows={[{ label: copy.config, value: <code>{plan.configPath}</code> }, { label: copy.name, value: plan.registrationName }, { label: copy.support, value: copy.confirmation[info.confirmation] }]}>
+                <div className="ui-ai-diff"><strong>{plan.commandLine ? copy.command : copy.changes}</strong>{plan.commandLine ? <><pre tabIndex={0}>{plan.commandLine}</pre>{plan.manual && <p className="ui-ai-caution">{copy.manual}</p>}</> : <><div><span>{copy.before}</span><pre>{plan.before || "—"}</pre></div><div><span>{copy.after}</span><pre>{plan.after || "—"}</pre></div></>}<p className="ui-muted">{copy.backup}</p></div>
+                <button className="ui-button" type="button" onClick={() => { setPlan(null); setSelected(null); }}>{copy.cancel}</button>
+                {plan.manual ? <button className="ui-button ui-button--primary" type="button" onClick={() => void copyCommand(plan.commandLine || "")}>{copied ? copy.copied : copy.copy}</button> : <button className="ui-button ui-button--primary" type="button" onClick={() => void apply()} disabled={busy}>{selected.action === "disconnect" ? copy.remove : copy.apply}</button>}
+              </ConfirmPanel>}
+            </div>}
             {updateNeeded && <p className="ui-ai-caution" role="status">{copy.registrationUpdateHelp}</p>}
-            {info.client === "claude_code" && <p className="ui-muted">{copy.sharedRegistration}</p>}
+            {info.client === "claude_code" && <p className="ui-ai-note">{copy.sharedRegistration}</p>}
             {keysFor(info.client).map((key) => <div className="ui-ai-editor" key={key}>
               {info.client === "claude_code" && <strong>{key === "claudeCode" ? copy.cli : copy.codeTabLabel}</strong>}
               <label>{copy.scopeSetting} <select aria-label={`${names[info.client]} ${key === "claudeCode" ? copy.cli : key === "claudeCodeDesktop" ? copy.codeTabLabel : ""} ${copy.scopeSetting}`} value={policies[key].maxTier} disabled={busy} onChange={(event) => void savePolicy(key, event.target.value as AiTier, policies[key].allowTrustClientApproval)}>
@@ -97,13 +104,6 @@ export function AiIntegrationPage({ locale }: { locale: Locale }) {
               {key !== "claudeCode" && <label><input type="checkbox" checked={policies[key].allowTrustClientApproval} disabled={busy} onChange={(event) => { if (event.target.checked) setPendingConsent(key); else { setPendingConsent(null); void savePolicy(key, policies[key].maxTier, false); } }} />{copy.trustSetting}</label>}
               {pendingConsent === key && <div className="ui-ai-warning"><p>{copy.warning}</p><label><input type="checkbox" checked={false} onChange={(event) => { if (event.target.checked) { setPendingConsent(null); void savePolicy(key, policies[key].maxTier, true); } }} />{copy.understand}</label></div>}
             </div>)}
-            {open && <div className="ui-ai-editor">
-              {plan && <ConfirmPanel locale={locale} rows={[{ label: copy.config, value: <code>{plan.configPath}</code> }, { label: copy.name, value: plan.registrationName }, { label: copy.support, value: copy.confirmation[info.confirmation] }]}>
-                <div className="ui-ai-diff"><strong>{plan.commandLine ? copy.command : copy.changes}</strong>{plan.commandLine ? <><pre tabIndex={0}>{plan.commandLine}</pre>{plan.manual && <p className="ui-ai-caution">{copy.manual}</p>}</> : <><div><span>{copy.before}</span><pre>{plan.before || "—"}</pre></div><div><span>{copy.after}</span><pre>{plan.after || "—"}</pre></div></>}<p className="ui-muted">{copy.backup}</p></div>
-                <button className="ui-button" type="button" onClick={() => { setPlan(null); setSelected(null); }}>{copy.cancel}</button>
-                {plan.manual ? <button className="ui-button ui-button--primary" type="button" onClick={() => void copyCommand(plan.commandLine || "")}>{copied ? copy.copied : copy.copy}</button> : <button className="ui-button ui-button--primary" type="button" onClick={() => void apply()} disabled={busy}>{selected.action === "disconnect" ? copy.remove : copy.apply}</button>}
-              </ConfirmPanel>}
-            </div>}
           </div>;
         })}
       </section>
