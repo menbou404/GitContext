@@ -69,7 +69,7 @@ MCPサーバーが状態を変えた後、起動中のGUIは古い状態を表�
 
 ## ツールの段階分け
 
-MCPのツールは危険度で3段階に分ける。サーバー起動時の`--max-tier`で公開する範囲を決め、既定値は`read`とする。
+MCPのツールは危険度で3段階に分ける。実効範囲は、サーバー起動時の`--max-tier`（省略時`read`）と状態ファイルの`settings.aiClients`にある該当クライアントの`maxTier`の小さい方とする。`tools/list`はリクエストごとにこの範囲で絞り込み、範囲外の`tools/call`はAI連携画面への案内を返して拒否する。
 
 | Tier | 公開される操作 | 起動オプション |
 |---|---|---|
@@ -189,9 +189,9 @@ MRTRの`requestState`はサーバー側の確認待ちを指す不透明なラ�
 
 ### 確認の方法の決め方
 
-既定では、人の確認なしにGitHubが変更されないようにする。elicitationを使えない場合はGitContextの画面で確認する。GUIが使えない場合に限り、利用者が警告を理解して選んだ`--trust-client-approval`によってクライアント自身の確認に任せる。
+既定では、人の確認なしにGitHubが変更されないようにする。elicitationを使えない場合はGitContextの画面で確認する。GUIが使えない場合に限り、起動引数の`--trust-client-approval`と該当クライアントの`settings.aiClients.*.allowTrustClientApproval`が両方有効なときだけクライアント自身の確認に任せる。
 
-| クライアントの状態 | `--trust-client-approval`なし（既定） | `--trust-client-approval`あり |
+| クライアントの状態 | 実効の確認委任が無効（既定） | 引数とGitContext設定の両方で確認委任を許可 |
 |---|---|---|
 | elicitationに対応し、不安定な一覧にない | elicitationで確認する | elicitationで確認する |
 | elicitationに対応していない、または不安定な一覧にある。GitContextが起動中 | GitContextの画面で確認する | GitContextの画面で確認する |
@@ -201,7 +201,7 @@ MRTRの`requestState`はサーバー側の確認待ちを指す不透明なラ�
 - クライアント名とelicitation対応はリクエストごとに判定する。モダンプロトコルでは各リクエストの`_meta`にある`io.modelcontextprotocol/clientInfo`と`io.modelcontextprotocol/clientCapabilities`を使い、レガシープロトコルでは`initialize`の情報にフォールバックする。監査ログのクライアント名にも同じ情報を使う。
 - **不安定な一覧**: 対応を宣言しながら確認フォームを表示しないことが分かっているクライアントを、当該リクエストの`clientInfo.name`で判定する一覧。サーバーには区別がつかない「自動の拒否」を人の拒否と取り違えないためのもので、アプリの更新に合わせて見直す。
 - Claude CodeのデスクトップCodeタブが起動したサーバープロセスに空でない`CLAUDE_CODE_DESKTOP_APP_VERSION`がある場合は、起動時に一度判定して不安定なクライアントと同じ扱いにする。CLIとCodeタブは`clientInfo.name`が同じため名前だけでは区別できない。この環境変数は非公開仕様なので補助的な判定であり、応答時間による検出も併用する。
-- `--trust-client-approval`は、GUIの「AI連携」画面で、確認画面を出せないクライアントに「GitHub操作まで」を選び、警告に同意したときだけ登録時に付ける（[UI_DESIGN.md](UI_DESIGN.md)参照）。
+- `--trust-client-approval`は、GUIの「AI連携」画面で確認画面を出せないクライアントについて警告に同意したときだけ登録時に付ける。登録済みでもGitContextの設定で許可していない場合は無効となる（[UI_DESIGN.md](UI_DESIGN.md)参照）。
 - どの方法でも、プレビューIDの照合は必ず行う。
 - GUIとの通信はユーザーSIDで識別する名前付きパイプを使う。パイプは作成したユーザーだけに許可し、MCP側はサーバープロセスの実行ファイルが期待するGitContextのパスと一致することを確認する。GUIの拒否・期限切れ・不正な応答は実行しない。GUIの確認は1回の`tools/call`内で完結し、MRTRの再送には使わない。
 - 監査ログには、確認の方法（`elicitation`／`gui`／`client`／`auto`）と結果を記録する。クライアントに任せた場合と自動承認した場合は、実行結果にもその旨を含める。
@@ -309,10 +309,11 @@ GUIの「AI連携」画面（[UI_DESIGN.md](UI_DESIGN.md)）は、次のよう�
   - **接続済み**: 登録があり、登録の実行ファイルが現在の`gitcontext-mcp.exe`と一致し、存在する。
   - **要修復**: 登録はあるが、実行ファイルが存在しない、または別の場所を指している。
   - **未接続**: 登録がない。
-  - 公開する範囲（`--max-tier`）と`--trust-client-approval`の有無は、登録の引数から読み取って表示する。
+  - 登録の起動上限（`--max-tier`）と`--trust-client-approval`の有無は、登録の引数から読み取って表示する。公開する範囲は`settings.aiClients`に保存し、Claude CodeのCLIとCodeタブは別々に選べる。
 - 書き込みの前に、対象の設定ファイルを状態ディレクトリの`backups\ai-clients\`へ日時付きでコピーし、追加・変更・削除する項目の前後を画面に表示する。CLIを使う場合は、実行するコマンドを表示する。
 - 書き込みの後に設定を読み直し、登録が意図どおりかを確認する。「接続を確認」では、登録された実行ファイルと引数でサーバーを起動し、`initialize`と`tools/list`が応答するか（10秒以内）を確かめ、公開されたツールの数を表示する。
-- 確認画面への対応は、上記「クライアントの対応状況」に合わせて表示する。Claude CodeはCLIが対応、Codeタブが非対応で登録が共通のため、「GitHub操作まで」を選ぶと、Codeタブでは確認画面が出ないことと`--trust-client-approval`の意味を説明する。
+- AI連携画面からの新規登録・修復・登録更新は上限として`--max-tier remote`を付け、公開範囲の変更は状態ファイルに即時保存する。古い登録の上限が設定より狭い場合は登録更新を案内する。
+- 確認画面への対応は、上記「クライアントの対応状況」に合わせて表示する。Claude CodeはCLIが対応、Codeタブが非対応で登録が共通のため、Codeタブでクライアント側の確認を許す際に警告と同意を求める。
 - MCPには、登録を変更するツールを用意しない。
 
 AIクライアントごとの公開範囲をGitContextの設定で決め、起動の引数を上限として扱う仕組みは[POLICY_DESIGN.md](POLICY_DESIGN.md)を参照。
@@ -320,9 +321,10 @@ AIクライアントごとの公開範囲をGitContextの設定で決め、起�
 ### Tierの選び方
 
 - まずは既定の`read`で使い始め、必要になったら`local`、`remote`へ広げることを推奨する。
+- AI連携画面で選ぶ範囲はクライアントごとに状態ファイルへ保存され、接続中のMCPサーバーの次のリクエストから反映される。Claude CodeのCLIとCodeタブは同じ登録を使うが、保存する範囲は別。起動引数の上限が狭い場合は登録の更新が必要。
 - CodexのMCPサーバーはCodexのサンドボックスの外で動く。サンドボックスでGit操作を制限していても、`remote`を公開すればMCP経由でpushやmergeができる点に注意する。
 - GitContext自体の開発では、[CONTRIBUTING.md](../CONTRIBUTING.md)の役割分担に合わせて、Codexには`read`だけを設定する。
-- 確認画面を出せないクライアント（上記「クライアントの対応状況」）でも、GUIで個別に自動承認した操作は`--trust-client-approval`なしで実行できる。その他の`remote`操作は、起動中のGitContextの画面で確認する。GUIに接続できず`--trust-client-approval`を付けた場合だけ、GitHub操作の前の確認はクライアント自身の確認に任せる。クライアント側で自動承認を有効にしていると確認なしにpushやmergeが実行されるため、GitContextのツールには毎回確認を出す設定にすること。
+- 確認画面を出せないクライアント（上記「クライアントの対応状況」）でも、GUIで個別に自動承認した操作は確認委任なしで実行できる。その他の`remote`操作は、起動中のGitContextの画面で確認する。GUIに接続できず、起動引数とGitContext設定の両方で確認委任を許可した場合だけ、GitHub操作の前の確認はクライアント自身に任せる。クライアント側で自動承認を有効にしていると確認なしにpushやmergeが実行されるため、GitContextのツールには毎回確認を出す設定にすること。
 
 ## 配布
 

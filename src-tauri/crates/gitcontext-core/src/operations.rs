@@ -1,14 +1,15 @@
 use crate::{
+    ai_clients,
     environment::*,
     git_ops,
     github::*,
     models::{
-        normalize_profile, validate_profile, AiNotifications, AppData, AppSettings, ApplyPreview,
-        AutoApprove, AutoApproveSource, BootstrapResult, BranchResult, CloneResult, CommitPreview,
-        CommitResult, GhProfileStatus, GithubRepository, MergePullRequestResult,
-        NewRepositoryDefaults, Profile, ProfileAutoApprove, PublishResult, PullRequestManagement,
-        PullRequestPreview, PullRequestResult, PushPreview, PushResult, RepositoryRecord,
-        SyncPreview,
+        normalize_profile, validate_profile, AiClientKey, AiClientPolicy, AiNotifications, AppData,
+        AppSettings, ApplyPreview, AutoApprove, AutoApproveSource, BootstrapResult, BranchResult,
+        CloneResult, CommitPreview, CommitResult, GhProfileStatus, GithubRepository,
+        MergePullRequestResult, NewRepositoryDefaults, Profile, ProfileAutoApprove, PublishResult,
+        PullRequestManagement, PullRequestPreview, PullRequestResult, PushPreview, PushResult,
+        RepositoryRecord, SyncPreview,
     },
     storage::{development_data, StateStore},
 };
@@ -28,6 +29,10 @@ pub fn load_state(store: &StateStore) -> Result<AppData, String> {
 }
 
 pub fn bootstrap(store: &StateStore) -> Result<BootstrapResult, String> {
+    let inventory = ai_clients::default_paths()
+        .ok()
+        .and_then(|paths| ai_clients::list(&paths).ok());
+    migrate_ai_client_policies(store, inventory.as_ref())?;
     let _guard = store.lock()?;
     let data = store.load()?;
     let storage_path = store.state_path().to_string_lossy().into_owned();
@@ -38,6 +43,113 @@ pub fn bootstrap(store: &StateStore) -> Result<BootstrapResult, String> {
         demo_mode: false,
         development_data: development_data(),
     })
+}
+
+pub fn migrate_ai_client_policies(
+    store: &StateStore,
+    inventory: Option<&ai_clients::Inventory>,
+) -> Result<(), String> {
+    let _guard = store.lock()?;
+    // Only the GUI performs this one-time migration; until then the setting is absent
+    // from the state file, so saves by the MCP server cannot mark it as done.
+    let mut data = store.load()?;
+    if data.settings.ai_clients.is_none() {
+        data.settings.ai_clients = Some(
+            inventory
+                .map(ai_clients::policies_from_inventory)
+                .unwrap_or_default(),
+        );
+        store.save(&data)?;
+    }
+    Ok(())
+}
+
+pub fn set_ai_client_policy(
+    store: &StateStore,
+    client: AiClientKey,
+    policy: AiClientPolicy,
+) -> Result<AppSettings, String> {
+    let _guard = store.lock()?;
+    let mut data = store.load()?;
+    let policies = data
+        .settings
+        .ai_clients
+        .get_or_insert_with(Default::default);
+    if policies.get(client) != &policy {
+        *policies.get_mut(client) = policy;
+        store.save(&data)?;
+    }
+    Ok(data.settings)
+}
+
+#[cfg(test)]
+mod ai_policy_tests {
+    use super::*;
+    use crate::ai_clients::{Client, ClientInfo, Inventory, ServerInfo, Tier};
+    use crate::models::AiClientTier;
+
+    #[test]
+    fn migrates_registration_once_and_changes_only_selected_client() {
+        let root = std::env::temp_dir().join(format!("gitcontext-policy-{}", uuid::Uuid::new_v4()));
+        let store = StateStore::new(root.clone());
+        let info = |client, tier, trust| ClientInfo {
+            client,
+            state: "connected".into(),
+            tier,
+            trust,
+            confirmation: "unsupported".into(),
+            config_path: root.join("unused"),
+            registration_name: "test".into(),
+            command: Some("test-mcp".into()),
+            args: vec![],
+            cli_available: false,
+        };
+        let inventory = Inventory {
+            server: ServerInfo {
+                path: root.join("test-mcp"),
+                version: None,
+                development: true,
+                built: false,
+                registration_name: "test".into(),
+            },
+            clients: vec![
+                info(Client::ClaudeCode, Tier::Local, true),
+                info(Client::Codex, Tier::Remote, false),
+                info(Client::ClaudeDesktop, Tier::Read, false),
+            ],
+        };
+        migrate_ai_client_policies(&store, Some(&inventory)).unwrap();
+        let settings = load_state(&store).unwrap().settings;
+        assert_eq!(
+            settings.ai_clients.as_ref().unwrap().claude_code.max_tier,
+            AiClientTier::Local
+        );
+        assert_eq!(
+            settings.ai_clients.as_ref().unwrap().claude_code_desktop,
+            settings.ai_clients.as_ref().unwrap().claude_code
+        );
+        assert_eq!(
+            settings.ai_clients.as_ref().unwrap().codex.max_tier,
+            AiClientTier::Remote
+        );
+        migrate_ai_client_policies(&store, None).unwrap();
+        assert_eq!(
+            load_state(&store).unwrap().settings.ai_clients,
+            settings.ai_clients
+        );
+        let policy = AiClientPolicy {
+            max_tier: AiClientTier::Read,
+            allow_trust_client_approval: true,
+        };
+        set_ai_client_policy(&store, AiClientKey::Other, policy.clone()).unwrap();
+        let changed = load_state(&store).unwrap().settings.ai_clients.unwrap();
+        assert_eq!(changed.other, policy);
+        assert_eq!(
+            changed.claude_code,
+            settings.ai_clients.as_ref().unwrap().claude_code
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }
 
 pub fn set_locale(store: &StateStore, locale: String) -> Result<AppSettings, String> {

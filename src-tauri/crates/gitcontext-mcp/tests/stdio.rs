@@ -208,6 +208,27 @@ fn initialize(rpc: &mut Rpc) {
     initialize_with_capabilities(rpc, json!({}));
 }
 
+fn initialize_named(rpc: &mut Rpc, name: &str) -> Value {
+    let result = rpc.request(
+        1,
+        "initialize",
+        json!({
+            "protocolVersion": "2025-11-25", "capabilities": {},
+            "clientInfo": { "name": name, "version": "1" }
+        }),
+    );
+    rpc.send(json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }));
+    result
+}
+
+fn set_policy(data_dir: &Path, key: &str, tier: &str, trust: bool) {
+    let path = data_dir.join("state.json");
+    let mut state: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    state["settings"]["aiClients"][key] =
+        json!({"maxTier": tier, "allowTrustClientApproval": trust});
+    fs::write(path, state.to_string()).unwrap();
+}
+
 fn initialize_with_capabilities(rpc: &mut Rpc, capabilities: Value) {
     rpc.request(
         1,
@@ -230,6 +251,12 @@ fn local_fixture(fixture: &Fixture) -> (PathBuf, PathBuf) {
         data_dir.join("state.json"),
         json!({
             "version": 2,
+            "settings": {"aiClients": {
+                "claudeCode": {"maxTier":"remote","allowTrustClientApproval":true},
+                "claudeCodeDesktop": {"maxTier":"remote","allowTrustClientApproval":true},
+                "codex": {"maxTier":"remote","allowTrustClientApproval":true},
+                "other": {"maxTier":"remote","allowTrustClientApproval":true}
+            }},
             "profiles": [{
                 "id": "fictional", "label": "Fictional", "accent": "#112233",
                 "gitName": "Sample Person", "gitEmail": "sample@example.com",
@@ -418,7 +445,11 @@ fn read_tier_hides_and_rejects_local_tools() {
     ] {
         assert!(!names.contains(&name));
         let response = rpc.request_any(3, "tools/call", json!({"name": name, "arguments": {}}));
-        assert!(response.get("error").is_some(), "{name} was callable");
+        assert_eq!(response["result"]["isError"], true, "{name} was callable");
+        assert!(response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("AI integration"));
     }
     let preview = rpc.call(
         4,
@@ -426,6 +457,167 @@ fn read_tier_hides_and_rejects_local_tools() {
         json!({"repositoryId": "repo-1", "profileId": "fictional"}),
     );
     assert!(preview["structuredContent"].get("previewId").is_none());
+}
+
+#[test]
+fn policy_and_argument_use_the_lower_tier_for_each_client() {
+    for (argument, key, policy, name, desktop, remote) in [
+        ("remote", "other", "read", "unknown-test", false, false),
+        ("read", "other", "remote", "unknown-test", false, false),
+        ("remote", "other", "remote", "unknown-test", false, true),
+        ("remote", "claudeCode", "remote", "claude-code", false, true),
+        (
+            "remote",
+            "claudeCodeDesktop",
+            "read",
+            "claude-code",
+            true,
+            false,
+        ),
+        ("remote", "codex", "read", "codex-mcp-client", false, false),
+    ] {
+        let fixture = Fixture::new();
+        let (_, data_dir) = local_fixture(&fixture);
+        set_policy(&data_dir, key, policy, false);
+        let mut rpc = Rpc::start_with_desktop(&data_dir, argument, false, None, desktop);
+        let info = initialize_named(&mut rpc, name);
+        assert_eq!(info["capabilities"]["tools"]["listChanged"], true);
+        let list = rpc.request(2, "tools/list", json!({}));
+        let names = list["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|tool| tool["name"].as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            names.contains(&"push"),
+            remote,
+            "{argument}/{key}/{policy}/{name}"
+        );
+        if !remote {
+            let response = rpc.call(3, "push", json!({}));
+            assert_eq!(response["isError"], true);
+            assert!(response["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("AI integration"));
+        }
+    }
+}
+
+#[test]
+fn launch_arguments_decide_until_gitcontext_saves_policies() {
+    // Before the GUI migrates, MCP saves must not record policies; otherwise the
+    // migration would be skipped and existing registrations would lose access.
+    let fixture = Fixture::new();
+    let (repository, data_dir) = local_fixture(&fixture);
+    let path = data_dir.join("state.json");
+    let mut state: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    state["settings"]
+        .as_object_mut()
+        .unwrap()
+        .remove("aiClients");
+    fs::write(&path, state.to_string()).unwrap();
+    let mut rpc = Rpc::start_with_desktop(&data_dir, "remote", false, None, false);
+    initialize_named(&mut rpc, "claude-code");
+    let list = rpc.request(2, "tools/list", json!({}));
+    assert!(list["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|tool| tool["name"] == "push"));
+    let added = rpc.call(
+        3,
+        "add_repository",
+        json!({"path": repository.to_string_lossy()}),
+    );
+    assert_eq!(added["isError"], false, "{added}");
+    let state: Value =
+        serde_json::from_slice(&fs::read(data_dir.join("state.json")).unwrap()).unwrap();
+    assert!(state["settings"].get("aiClients").is_none(), "{state}");
+}
+
+#[test]
+fn policy_change_updates_list_and_notifies_legacy_stdio_client() {
+    let fixture = Fixture::new();
+    let (_, data_dir) = local_fixture(&fixture);
+    set_policy(&data_dir, "other", "read", false);
+    let mut rpc = Rpc::start_tier(&data_dir, "remote");
+    initialize(&mut rpc);
+    assert!(!rpc.request(2, "tools/list", json!({}))["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item["name"] == "push"));
+    set_policy(&data_dir, "other", "remote", false);
+    let changed = rpc.read_message();
+    assert_eq!(changed["method"], "notifications/tools/list_changed");
+    assert!(rpc.request(3, "tools/list", json!({}))["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item["name"] == "push"));
+}
+
+#[test]
+fn modern_stateless_request_reloads_policy_without_unsolicited_notification() {
+    let fixture = Fixture::new();
+    let (_, data_dir) = local_fixture(&fixture);
+    set_policy(&data_dir, "other", "read", false);
+    let mut rpc = Rpc::start_tier(&data_dir, "remote");
+    rpc.request(
+        1,
+        "initialize",
+        json!({
+            "protocolVersion": "2026-07-28", "capabilities": {},
+            "clientInfo": { "name": "modern-test", "version": "1" }
+        }),
+    );
+    rpc.send(json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }));
+    let first = rpc.modern_request(2, "tools/list", json!({}), json!({}));
+    assert!(!first["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item["name"] == "push"));
+    set_policy(&data_dir, "other", "remote", false);
+    std::thread::sleep(Duration::from_secs(4));
+    let next = rpc.modern_request(3, "tools/list", json!({}), json!({}));
+    assert!(next["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item["name"] == "push"));
+}
+
+#[test]
+fn modern_request_uses_its_own_client_info_for_scope() {
+    let fixture = Fixture::new();
+    let (_, data_dir) = local_fixture(&fixture);
+    set_policy(&data_dir, "codex", "read", false);
+    let mut rpc = Rpc::start_tier(&data_dir, "remote");
+    initialize(&mut rpc);
+    let list = rpc.request(
+        2,
+        "tools/list",
+        json!({
+            "_meta": {
+                "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                "io.modelcontextprotocol/clientInfo": {"name":"codex-mcp-client","version":"1"},
+                "io.modelcontextprotocol/clientCapabilities": {}
+            }
+        }),
+    );
+    assert!(!list["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item["name"] == "push"));
+    assert!(rpc.request(3, "tools/list", json!({}))["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| item["name"] == "push"));
 }
 
 #[test]
@@ -2040,6 +2232,22 @@ fn trusted_client_without_elicitation_uses_client_confirmation() {
     let audit = fs::read_to_string(data_dir.join("mcp-audit.jsonl")).unwrap();
     let last: Value = serde_json::from_str(audit.lines().last().unwrap()).unwrap();
     assert_eq!(last["confirmation"], "client");
+}
+
+#[test]
+fn trust_argument_needs_matching_saved_permission() {
+    let fixture = Fixture::new();
+    let (_, data_dir) = push_fixture(&fixture);
+    set_policy(&data_dir, "other", "remote", false);
+    let mut rpc = Rpc::start_with(&data_dir, "remote", true, None);
+    initialize(&mut rpc);
+    let id = applied_push_preview(&mut rpc);
+    let response = rpc.call(5, "push", json!({"previewId":id}));
+    assert_eq!(response["isError"], true);
+    assert!(response["content"][0]["text"]
+        .as_str()
+        .unwrap()
+        .contains("AI integration"));
 }
 
 #[test]

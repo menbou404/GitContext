@@ -81,6 +81,7 @@ export interface AppData {
 }
 
 export interface AppSettings {
+  aiClients?: AiClientPolicies;
   locale?: string | null;
   aiIntegrationNoticeDismissed?: boolean;
   closeToTray?: boolean;
@@ -88,6 +89,10 @@ export interface AppSettings {
   aiNotifications?: "off" | "github" | "all";
   statusNotifications?: boolean;
 }
+
+export type AiClientKey = "claudeCode" | "claudeCodeDesktop" | "codex" | "other";
+export interface AiClientPolicy { maxTier: AiTier; allowTrustClientApproval: boolean }
+export type AiClientPolicies = Record<AiClientKey, AiClientPolicy>;
 
 export interface ToolStatus {
   available: boolean;
