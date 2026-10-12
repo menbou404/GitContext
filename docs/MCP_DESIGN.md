@@ -315,6 +315,8 @@ GUIの「AI連携」画面（[UI_DESIGN.md](UI_DESIGN.md)）は、次のよう�
 - 確認画面への対応は、上記「クライアントの対応状況」に合わせて表示する。Claude CodeはCLIが対応、Codeタブが非対応で登録が共通のため、「GitHub操作まで」を選ぶと、Codeタブでは確認画面が出ないことと`--trust-client-approval`の意味を説明する。
 - MCPには、登録を変更するツールを用意しない。
 
+AIクライアントごとの公開範囲をGitContextの設定で決め、起動の引数を上限として扱う仕組みは[POLICY_DESIGN.md](POLICY_DESIGN.md)を参照。
+
 ### Tierの選び方
 
 - まずは既定の`read`で使い始め、必要になったら`local`、`remote`へ広げることを推奨する。
