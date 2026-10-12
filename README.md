@@ -116,9 +116,9 @@ Windowsでは、配布版は`%USERPROFILE%\.gitcontext`、`npm run tauri dev`な
 
 ### MCPサーバー
 
-GUIの「AI連携」画面からClaude Code、Codex（CLI・Desktop共通）、Claude Desktopへの登録・範囲変更・修復・解除ができます。設定の差分を確認してからバックアップ付きで適用し、接続確認で公開されたツール数を表示します。開発版でサーバーが未ビルドの場合は、`cargo build --manifest-path src-tauri/Cargo.toml -p gitcontext-mcp`を実行してください。
+GUIの「AI連携」画面からClaude Code、Codex（CLI・Desktop共通）、Claude Desktopへの登録・範囲変更・修復・解除ができます。公開する範囲はクライアントごとに即時保存され、Claude CodeのCLIとCodeタブは別々に選べます。登録の起動上限が設定より狭いときは、画面から登録を更新できます。確認をクライアント自身に任せる設定には警告への同意が必要です。登録ファイルの変更は差分を確認してからバックアップ付きで適用します。開発版でサーバーが未ビルドの場合は、`cargo build --manifest-path src-tauri/Cargo.toml -p gitcontext-mcp`を実行してください。
 
-AIエージェントからGitContextのProfileとリポジトリを扱うMCPサーバー`gitcontext-mcp`を開発中です。既定では読み取り専用のツールだけを公開します。`--max-tier local`を付けて起動すると、プロファイルの適用、ブランチ作成、commit、pullなどのローカルの変更も、プレビューで確認した内容に限って実行できます。`--max-tier remote`を付けると、push、Pull Requestの作成とmerge、clone、GitHubへの公開も実行でき、実行の前にAIクライアントの画面で確認を求めます（MCPのelicitation）。確認画面を表示できないクライアントでは、通常はGitHub操作を実行しません。`--trust-client-approval`を付けた場合、確認画面を表示できるクライアントでは引き続きGitContextの確認画面を使い、表示できないクライアントではクライアント自身の確認に任せます。後者で自動承認を有効にしていると、確認なしにpushやmergeが実行されます。GUIのリポジトリ詳細では、作業ブランチへのpush、既定ブランチへのpush、Pull Requestの作成とmerge、GitHubへの公開をそれぞれ自動承認できます。プロファイルの編集画面では、そのプロファイルを使うcloneを自動承認できます。各項目は既定で無効で、有効にした操作は確認画面を出せないクライアントでもMCPの確認なしで実行されます。AIによる変更の操作は、データフォルダの`mcp-audit.jsonl`に記録されます。設計は[docs/MCP_DESIGN.md](docs/MCP_DESIGN.md)を参照してください。
+AIエージェントからGitContextのProfileとリポジトリを扱うMCPサーバー`gitcontext-mcp`を開発中です。既定では読み取り専用のツールだけを公開します。実効範囲は`--max-tier`とGitContextのAI連携画面で保存した範囲の小さい方です。`local`ではプロファイルの適用、ブランチ作成、commit、pullなどのローカル変更を、`remote`ではpush、Pull Requestの作成とmerge、clone、GitHubへの公開を、プレビューで確認した内容に限って実行できます。GitHub操作ではAIクライアントの確認画面かGitContextの確認ウィンドウを使います。確認ができないときにクライアント自身へ任せるには、`--trust-client-approval`とGitContext側の許可の両方が必要です。クライアント側で自動承認を有効にしていると確認なしにpushやmergeが実行されるため、許可時は画面の警告を確認してください。GUIでは操作ごとの自動承認も設定できます。AIによる変更は`mcp-audit.jsonl`に記録されます。設計は[docs/MCP_DESIGN.md](docs/MCP_DESIGN.md)を参照してください。
 
 手動で登録する場合は、次の例の`C:\path\to\GitContext`を実際のリポジトリの絶対パスに置き換えてください。開発版の登録名は`gitcontext-dev`、配布版は`gitcontext`です。以下は読み取り専用の開発版の例です。
 

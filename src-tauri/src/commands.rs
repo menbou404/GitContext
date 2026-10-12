@@ -21,6 +21,15 @@ pub fn list_ai_clients() -> Result<AiInventory, String> {
 }
 
 #[tauri::command]
+pub fn set_ai_client_policy(
+    store: State<'_, StateStore>,
+    client: AiClientKey,
+    policy: AiClientPolicy,
+) -> Result<AppSettings, String> {
+    operations::set_ai_client_policy(&store, client, policy)
+}
+
+#[tauri::command]
 pub fn plan_ai_client(
     client: AiClient,
     action: AiAction,

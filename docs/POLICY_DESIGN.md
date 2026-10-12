@@ -89,7 +89,7 @@ AI連携画面に、AIクライアント側で設定ファイルの変更を防�
 
 | 段階 | 内容 |
 |---|---|
-| C-1 | `settings.aiClients`、範囲の決め方（上限A・Bの小さい方）、クライアントの識別、`tools/list`の絞り込みと`tools/list_changed`、`--trust-client-approval`の許可、AI連携画面での範囲の選択、登録の上限を`remote`にする変更、移行 |
+| C-1 | 実装済み。`settings.aiClients`、範囲の決め方（上限A・Bの小さい方）、クライアントの識別、`tools/list`のリクエストごとの絞り込み、`--trust-client-approval`の許可、AI連携画面での範囲の選択、登録の上限を`remote`にする変更、GUI起動時の一度だけの移行。状態ファイルの更新を3秒ごとに確認し、レガシーstdio接続には`notifications/tools/list_changed`を送る。2026-07-28のステートレス接続では購読のない非同期通知を送れないため、次の`tools/list`から反映する。capabilitiesの`tools.listChanged`はtrue。 |
 | C-2 | GUI以外による変更の検出（状態ファイルの安全に関わる設定の差し戻し、登録の引数の変化、起動時の比較） |
 | C-3 | AIクライアント側の権限ルールの案内と書き込み |
 

@@ -1,4 +1,5 @@
 //! Explicit, reviewable registration of the MCP server with local AI clients.
+use crate::models::{AiClientPolicies, AiClientTier};
 use chrono::Local;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -44,15 +45,6 @@ pub enum Tier {
     Read,
     Local,
     Remote,
-}
-impl Tier {
-    fn arg(self) -> &'static str {
-        match self {
-            Self::Read => "read",
-            Self::Local => "local",
-            Self::Remote => "remote",
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -389,12 +381,33 @@ pub fn list(paths: &ClientPaths) -> Result<Inventory, String> {
     })
 }
 
-fn args_for(tier: Tier, trust: bool) -> Vec<String> {
-    let mut args = vec!["--max-tier".into(), tier.arg().into()];
+fn args_for(_tier: Tier, trust: bool) -> Vec<String> {
+    let mut args = vec!["--max-tier".into(), "remote".into()];
     if trust {
         args.push("--trust-client-approval".into());
     }
     args
+}
+
+pub fn policies_from_inventory(inventory: &Inventory) -> AiClientPolicies {
+    let mut policies = AiClientPolicies::default();
+    for info in &inventory.clients {
+        let policy = match info.client {
+            Client::ClaudeCode => &mut policies.claude_code,
+            Client::Codex => &mut policies.codex,
+            Client::ClaudeDesktop => &mut policies.other,
+        };
+        if info.command.is_some() {
+            policy.max_tier = match info.tier {
+                Tier::Read => AiClientTier::Read,
+                Tier::Local => AiClientTier::Local,
+                Tier::Remote => AiClientTier::Remote,
+            };
+            policy.allow_trust_client_approval = info.trust;
+        }
+    }
+    policies.claude_code_desktop = policies.claude_code.clone();
+    policies
 }
 fn changed_text(
     paths: &ClientPaths,
@@ -495,15 +508,12 @@ pub fn plan(
     trust: bool,
 ) -> Result<Plan, String> {
     if trust
-        && (tier != Tier::Remote
-            || !matches!(
-                client,
-                Client::ClaudeCode | Client::Codex | Client::ClaudeDesktop
-            ))
+        && !matches!(
+            client,
+            Client::ClaudeCode | Client::Codex | Client::ClaudeDesktop
+        )
     {
-        return Err(
-            "Trust is only available for remote access on unsupported or unstable clients".into(),
-        );
+        return Err("Trust is only available on supported registrations".into());
     }
     if action != Action::Disconnect && !paths.server.built {
         return Err("MCP server is not built. Run cargo build -p gitcontext-mcp.".into());
@@ -701,7 +711,12 @@ pub fn verify(paths: &ClientPaths, client: Client) -> Result<usize, String> {
                 }
             }
         });
-        let init = json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"gitcontext-gui","version":"0.1"}}});
+        let client_name = match client {
+            Client::ClaudeCode => "claude-code",
+            Client::Codex => "codex-mcp-client",
+            Client::ClaudeDesktop => "claude-desktop",
+        };
+        let init = json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":client_name,"version":"0.1"}}});
         writeln!(input, "{init}").map_err(|e| e.to_string())?;
         let response = rx
             .recv_timeout(deadline.saturating_duration_since(Instant::now()))
@@ -772,6 +787,7 @@ mod tests {
         let (_, paths) = fixture();
         let first = list(&paths).unwrap();
         assert_eq!(first.clients[0].state, "not_found");
+        assert_eq!(policies_from_inventory(&first), AiClientPolicies::default());
         put(&paths.claude_code, "{}");
         put(&paths.codex, "# current\n");
         put(&paths.claude_desktop, &format!("{{\"mcpServers\":{{\"gitcontext\":{{\"command\":\"{}\",\"args\":[\"--max-tier\",\"remote\",\"--trust-client-approval\"]}}}}}}", paths.server.path.display()).replace('\\', "\\\\"));
@@ -827,7 +843,7 @@ mod tests {
                 entry(&paths, Client::Codex, Some(&text))
                     .unwrap()
                     .map(|v| tier_from_args(&v.1)),
-                Some(tier)
+                Some(Tier::Remote)
             );
         }
         let plan = plan(&paths, Client::Codex, Action::Disconnect, Tier::Read, false).unwrap();
@@ -873,7 +889,7 @@ mod tests {
             entry(&paths, Client::ClaudeDesktop, Some(&text))
                 .unwrap()
                 .map(|v| tier_from_args(&v.1)),
-            Some(Tier::Local)
+            Some(Tier::Remote)
         );
         let plan = super::plan(
             &paths,
@@ -903,7 +919,7 @@ mod tests {
         assert!(plan_ai_trust_error(&paths));
     }
     fn plan_ai_trust_error(paths: &ClientPaths) -> bool {
-        plan(paths, Client::Codex, Action::Connect, Tier::Local, true).is_err()
+        plan(paths, Client::Codex, Action::Connect, Tier::Local, true).is_ok()
             && plan(
                 paths,
                 Client::ClaudeCode,

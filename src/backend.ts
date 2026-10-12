@@ -3,7 +3,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { demoBootstrap } from "./demoData";
 import type {
-  AiAction, AiClient, AiInventory, AiPlan, AiTier,
+  AiAction, AiClient, AiClientKey, AiClientPolicy, AiInventory, AiPlan, AiTier,
   AppData,
   AuditEntry,
   BackupEntry,
@@ -57,11 +57,16 @@ if (typeof window !== "undefined" && !isTauri() && new URLSearchParams(window.lo
 export async function listAiClients(): Promise<AiInventory> {
   return inDesktopApp() ? invoke<AiInventory>("list_ai_clients") : structuredClone(demoAi);
 }
+export async function setAiClientPolicy(client: AiClientKey, policy: AiClientPolicy): Promise<AppSettings> {
+  if (inDesktopApp()) return invoke<AppSettings>("set_ai_client_policy", { client, policy });
+  demoState.settings.aiClients ??= { claudeCode: { maxTier: "read", allowTrustClientApproval: false }, claudeCodeDesktop: { maxTier: "read", allowTrustClientApproval: false }, codex: { maxTier: "read", allowTrustClientApproval: false }, other: { maxTier: "read", allowTrustClientApproval: false } };
+  demoState.settings.aiClients[client] = policy;
+  return structuredClone(demoState.settings);
+}
 export async function planAiClient(client: AiClient, action: AiAction, tier: AiTier, trust: boolean): Promise<AiPlan> {
   if (inDesktopApp()) return invoke<AiPlan>("plan_ai_client", { client, action, tier, trust });
-  if (trust && tier !== "remote") throw new Error("Trust requires remote access.");
   const info = demoAi.clients.find((item) => item.client === client)!;
-  const args = ["--max-tier", tier, ...(trust ? ["--trust-client-approval"] : [])];
+  const args = ["--max-tier", "remote", ...(trust ? ["--trust-client-approval"] : [])];
   const render = (command: string, entryArgs: string[]) => client === "codex"
     ? `[mcp_servers.${info.registrationName}]
 command = '${command}'
@@ -77,8 +82,8 @@ export async function applyAiClient(plan: AiPlan): Promise<string | null> {
   const info = demoAi.clients.find((item) => item.client === plan.client)!;
   info.state = plan.action === "disconnect" ? "disconnected" : "connected";
   info.command = plan.action === "disconnect" ? null : demoAi.server.path;
-  info.args = plan.action === "disconnect" ? [] : ["--max-tier", plan.tier, ...(plan.trust ? ["--trust-client-approval"] : [])];
-  info.tier = plan.action === "disconnect" ? "read" : plan.tier;
+  info.args = plan.action === "disconnect" ? [] : ["--max-tier", "remote", ...(plan.trust ? ["--trust-client-approval"] : [])];
+  info.tier = plan.action === "disconnect" ? "read" : "remote";
   info.trust = plan.action !== "disconnect" && plan.trust;
   return "C:\\Demo\\GitContext\\backups\\ai-clients\\demo.json";
 }

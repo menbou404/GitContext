@@ -124,6 +124,14 @@ pub struct AppData {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
+    /// None until the GUI saves policies; the MCP server then keeps the legacy
+    /// behavior where the launch arguments alone decide the scope.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_ai_clients"
+    )]
+    pub ai_clients: Option<AiClientPolicies>,
     #[serde(default, deserialize_with = "deserialize_locale")]
     pub locale: Option<String>,
     #[serde(default)]
@@ -136,6 +144,88 @@ pub struct AppSettings {
     pub ai_notifications: AiNotifications,
     #[serde(default = "default_true")]
     pub status_notifications: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AiClientTier {
+    #[default]
+    Read,
+    Local,
+    Remote,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiClientPolicy {
+    #[serde(default, deserialize_with = "deserialize_ai_client_tier")]
+    pub max_tier: AiClientTier,
+    #[serde(default, deserialize_with = "deserialize_bool_false")]
+    pub allow_trust_client_approval: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiClientPolicies {
+    #[serde(default, deserialize_with = "deserialize_ai_client_policy")]
+    pub claude_code: AiClientPolicy,
+    #[serde(default, deserialize_with = "deserialize_ai_client_policy")]
+    pub claude_code_desktop: AiClientPolicy,
+    #[serde(default, deserialize_with = "deserialize_ai_client_policy")]
+    pub codex: AiClientPolicy,
+    #[serde(default, deserialize_with = "deserialize_ai_client_policy")]
+    pub other: AiClientPolicy,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AiClientKey {
+    ClaudeCode,
+    ClaudeCodeDesktop,
+    Codex,
+    Other,
+}
+
+impl AiClientPolicies {
+    pub fn get(&self, key: AiClientKey) -> &AiClientPolicy {
+        match key {
+            AiClientKey::ClaudeCode => &self.claude_code,
+            AiClientKey::ClaudeCodeDesktop => &self.claude_code_desktop,
+            AiClientKey::Codex => &self.codex,
+            AiClientKey::Other => &self.other,
+        }
+    }
+    pub fn get_mut(&mut self, key: AiClientKey) -> &mut AiClientPolicy {
+        match key {
+            AiClientKey::ClaudeCode => &mut self.claude_code,
+            AiClientKey::ClaudeCodeDesktop => &mut self.claude_code_desktop,
+            AiClientKey::Codex => &mut self.codex,
+            AiClientKey::Other => &mut self.other,
+        }
+    }
+}
+
+fn deserialize_ai_clients<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<AiClientPolicies>, D::Error> {
+    let value = serde_json::Value::deserialize(d)?;
+    Ok(Some(serde_json::from_value(value).unwrap_or_default()))
+}
+fn deserialize_ai_client_policy<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<AiClientPolicy, D::Error> {
+    let value = serde_json::Value::deserialize(d)?;
+    Ok(serde_json::from_value(value).unwrap_or_default())
+}
+fn deserialize_ai_client_tier<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<AiClientTier, D::Error> {
+    let value = serde_json::Value::deserialize(d)?;
+    Ok(serde_json::from_value(value).unwrap_or_default())
+}
+fn deserialize_bool_false<'de, D: serde::Deserializer<'de>>(d: D) -> Result<bool, D::Error> {
+    let value = serde_json::Value::deserialize(d)?;
+    Ok(value.as_bool().unwrap_or(false))
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -166,6 +256,7 @@ fn default_true() -> bool {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
+            ai_clients: None,
             locale: None,
             ai_integration_notice_dismissed: false,
             close_to_tray: true,
@@ -214,6 +305,27 @@ mod close_to_tray_tests {
             );
             assert!(serde_json::from_str::<AppData>(&json).is_err(), "{value}");
         }
+    }
+
+    #[test]
+    fn ai_client_policies_default_and_reject_invalid_values() {
+        let old: AppData =
+            serde_json::from_str(r#"{"version":2,"profiles":[],"repositories":[],"settings":{}}"#)
+                .unwrap();
+        assert_eq!(old.settings.ai_clients, None);
+        let invalid: AppData = serde_json::from_str(r#"{"version":2,"profiles":[],"repositories":[],"settings":{"aiClients":{"claudeCode":{"maxTier":"wide","allowTrustClientApproval":"yes"},"codex":null,"other":{"maxTier":"local"}}}}"#).unwrap();
+        assert_eq!(
+            invalid.settings.ai_clients.as_ref().unwrap().claude_code,
+            AiClientPolicy::default()
+        );
+        assert_eq!(
+            invalid.settings.ai_clients.as_ref().unwrap().codex,
+            AiClientPolicy::default()
+        );
+        assert_eq!(
+            invalid.settings.ai_clients.as_ref().unwrap().other.max_tier,
+            AiClientTier::Local
+        );
     }
 }
 
