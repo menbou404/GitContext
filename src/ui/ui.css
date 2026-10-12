@@ -295,6 +295,8 @@ html, body, #root { min-width: 1050px; }
 .ui-ai-actions .ui-button { white-space: nowrap; }
 .ui-ai-danger { color: var(--ui-danger); }
 .ui-ai-caution { color: var(--ui-caution); }
+.ui-ai-client > .ui-ai-caution { margin: 0 18px 10px; font-size: 12px; }
+.ui-ai-note { margin: 0 18px 10px; color: var(--ui-muted); font-size: 12px; }
 .ui-ai-editor { margin: 0 18px 16px; padding: 16px 18px; border: 1px solid var(--ui-line); border-radius: 6px; background: var(--ui-canvas); display: flex; flex-direction: column; gap: 16px; }
 .ui-ai-editor fieldset { border: 0; padding: 0; margin: 0; }
 .ui-ai-editor legend { margin-bottom: 8px; font-size: 13px; font-weight: 700; }
