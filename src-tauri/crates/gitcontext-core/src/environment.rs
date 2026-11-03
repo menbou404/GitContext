@@ -2,7 +2,6 @@ use crate::{
     git_ops,
     models::{EnvironmentStatus, ToolStatus},
 };
-use std::process::Command;
 
 pub fn environment_status() -> EnvironmentStatus {
     let git = probe_tool("git", &["--version"]);
@@ -21,7 +20,7 @@ pub fn environment_status() -> EnvironmentStatus {
 }
 
 fn probe_tool(program: &str, arguments: &[&str]) -> ToolStatus {
-    match Command::new(program).args(arguments).output() {
+    match crate::process::command(program).args(arguments).output() {
         Ok(output) if output.status.success() => {
             let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
             let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -50,7 +49,7 @@ fn probe_tool(program: &str, arguments: &[&str]) -> ToolStatus {
 }
 
 pub fn command_available(program: &str) -> bool {
-    Command::new(program)
+    crate::process::command(program)
         .arg("--version")
         .output()
         .is_ok_and(|output| output.status.success())

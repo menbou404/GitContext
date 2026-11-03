@@ -1703,10 +1703,10 @@ mod new_repository_tests {
 #[cfg(test)]
 mod auto_approve_tests {
     use super::*;
-    use std::{path::Path, process::Command};
+    use std::path::Path;
 
     fn git(path: &Path, args: &[&str]) {
-        let output = Command::new("git")
+        let output = crate::process::command("git")
             .arg("-C")
             .arg(path)
             .args(args)

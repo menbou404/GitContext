@@ -9,7 +9,7 @@ use std::{
     hash::{Hash, Hasher},
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::Stdio,
     sync::mpsc,
     time::{Duration, Instant},
 };
@@ -133,14 +133,18 @@ pub fn resolve_server(gui_exe: &Path, development: bool) -> ServerInfo {
     };
     let built = path.is_file();
     let version = if built {
-        Command::new(&path).arg("--version").output().ok().map(|o| {
-            let output = if o.stderr.is_empty() {
-                &o.stdout
-            } else {
-                &o.stderr
-            };
-            String::from_utf8_lossy(output).trim().to_owned()
-        })
+        crate::process::command(&path)
+            .arg("--version")
+            .output()
+            .ok()
+            .map(|o| {
+                let output = if o.stderr.is_empty() {
+                    &o.stdout
+                } else {
+                    &o.stderr
+                };
+                String::from_utf8_lossy(output).trim().to_owned()
+            })
     } else {
         None
     };
@@ -605,7 +609,7 @@ pub fn apply(
             contents(&fresh.config_path)?.as_deref(),
         )?;
         let add = |command: &Path, args: &[String]| -> Result<(), String> {
-            let output = Command::new(cli)
+            let output = crate::process::command(cli)
                 .args([
                     "mcp",
                     "add",
@@ -628,7 +632,7 @@ pub fn apply(
             fresh.action,
             Action::Disconnect | Action::Change | Action::Repair
         ) {
-            let output = Command::new(cli)
+            let output = crate::process::command(cli)
                 .args(["mcp", "remove", "--scope", "user", &fresh.registration_name])
                 .output()
                 .map_err(|e| e.to_string())?;
@@ -689,7 +693,7 @@ pub fn verify(paths: &ClientPaths, client: Client) -> Result<usize, String> {
         contents(config_path(paths, client))?.as_deref(),
     )?
     .ok_or("Client is not connected")?;
-    let mut child = Command::new(&registered.0)
+    let mut child = crate::process::command(&registered.0)
         .args(&registered.1)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
