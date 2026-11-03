@@ -427,7 +427,7 @@ pub(crate) fn resolve_gh_config_dir(
 }
 
 pub(crate) fn gh_command(directory: &Path) -> Command {
-    let mut command = Command::new("gh");
+    let mut command = crate::process::command("gh");
     command
         .env("GH_CONFIG_DIR", directory)
         .env_remove("GH_TOKEN")
@@ -486,7 +486,7 @@ pub(crate) fn extract_github_device_code(line: &str) -> Option<String> {
 
 #[cfg(target_os = "windows")]
 pub(crate) fn open_github_device_page() -> Result<(), String> {
-    Command::new("rundll32.exe")
+    crate::process::command("rundll32.exe")
         .args(["url.dll,FileProtocolHandler", GITHUB_DEVICE_URL])
         .spawn()
         .map(|_| ())
@@ -495,7 +495,7 @@ pub(crate) fn open_github_device_page() -> Result<(), String> {
 
 #[cfg(target_os = "macos")]
 pub(crate) fn open_github_device_page() -> Result<(), String> {
-    Command::new("open")
+    crate::process::command("open")
         .arg(GITHUB_DEVICE_URL)
         .spawn()
         .map(|_| ())
@@ -504,7 +504,7 @@ pub(crate) fn open_github_device_page() -> Result<(), String> {
 
 #[cfg(all(unix, not(target_os = "macos")))]
 pub(crate) fn open_github_device_page() -> Result<(), String> {
-    Command::new("xdg-open")
+    crate::process::command("xdg-open")
         .arg(GITHUB_DEVICE_URL)
         .spawn()
         .map(|_| ())

@@ -2,7 +2,7 @@ use std::{
     collections::BTreeSet,
     env, fs,
     path::{Path, PathBuf},
-    process::{Command, Output},
+    process::Output,
 };
 
 use crate::models::{
@@ -178,7 +178,7 @@ pub fn commit_exact_changes(
     let staged = if add_paths.is_empty() {
         cached_paths(&root)
     } else {
-        let output = Command::new("git")
+        let output = crate::process::command("git")
             .current_dir(&root)
             .args(["add", "-A", "--"])
             .args(add_paths)
@@ -250,7 +250,7 @@ pub fn clone_repository(
         .find_map(|(key, value)| (key == "core.sshCommand").then_some(value).flatten())
         .ok_or_else(|| "Choose an SSH private key for this Profile before cloning.".to_string())?;
     let destination_text = destination.to_string_lossy().into_owned();
-    let output = Command::new("git")
+    let output = crate::process::command("git")
         .current_dir(&parent)
         .arg("-c")
         .arg(format!("core.sshCommand={ssh_command}"))
@@ -498,7 +498,7 @@ pub fn push_current_branch(
         "refs/heads/{branch}:refs/heads/{branch}",
         branch = preview.branch
     );
-    let output = Command::new("git")
+    let output = crate::process::command("git")
         .current_dir(&root)
         .args(["push", "--set-upstream", "--", "origin", refspec.as_str()])
         .output()
@@ -915,7 +915,7 @@ fn read_local_config(root: &Path, key: &str) -> Option<String> {
 }
 
 fn write_local_config(root: &Path, key: &str, value: &str) -> Result<(), String> {
-    let output = Command::new("git")
+    let output = crate::process::command("git")
         .current_dir(root)
         .args(["config", "--local", "--replace-all", key, value])
         .output()
@@ -951,7 +951,7 @@ fn git_optional(root: &Path, args: &[&str]) -> Option<String> {
 }
 
 fn run_git(root: &Path, args: &[&str]) -> Result<Output, String> {
-    Command::new("git")
+    crate::process::command("git")
         .current_dir(root)
         .args(args)
         .output()
